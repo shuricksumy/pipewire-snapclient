@@ -1,0 +1,20 @@
+services:
+  snapclient-dx5:
+    image: ghcr.io/shuricksumy/snapcast-pipewire:latest
+    container_name: snapclient-dx5
+    network_mode: host
+    cap_add: [ SYS_NICE ]
+    ulimits: { rtprio: 99, memlock: -1 }
+    volumes: [ "/run/user/1000/pipewire-0:/tmp/pipewire-0" ]
+    environment:
+      - ROLE=snapclient
+      - SERVER_IP=192.168.111.111
+      - SERVER_PORT=1704
+      - PLAYER_NAME=DX5 # part of name like in wpctl status Audio - to set volume
+      - CLIENT_ID=DX5-Snapclient
+      - PIPEWIRE_RUNTIME_DIR=/tmp
+      - PIPEWIRE_REMOTE=pipewire-0
+      - PIPEWIRE_NODE=alsa_output.usb-Topping_DX5-00.analog-stereo
+      - PIPEWIRE_LATENCY=2048/192000
+      - SNAP_EXTRA=--hostID DX5-Snapcast
+    restart: unless-stopped

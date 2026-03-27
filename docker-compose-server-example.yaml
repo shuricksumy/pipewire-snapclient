@@ -1,0 +1,38 @@
+services:
+  snapserver:
+    image: ghcr.io/shuricksumy/snapcast-pipewire:latest
+    container_name: snapserver
+    restart: unless-stopped
+    
+    # Host mode is required for Avahi/mDNS discovery to work across the network
+    network_mode: host
+
+    environment:
+      - ROLE=snapserver
+      - SNAP_PORT=1704
+      - EXTRA_ARGS=-v # Verbose logging for troubleshooting
+      
+    volumes:
+      # 1. Persistent configuration (streams, client names, etc.)
+      - ./snapserver_config:/config
+      
+      # 2. Shared Named Pipes (FIFOs)
+      # This allows other containers to write audio data to Snapserver
+      - /tmp/snapfifo:/tmp
+      
+      # 3. Timezone synchronization
+      - /etc/localtime:/etc/localtime:ro
+
+    # Optional: Resource constraints for high-res audio stability
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'
+          memory: 512M
+
+    healthcheck:
+      test: ["CMD", "timeout", "1s", "bash", "-c", "cat < /dev/null > /dev/tcp/127.0.0.1/1704"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
