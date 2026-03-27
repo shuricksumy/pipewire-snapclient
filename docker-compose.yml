@@ -15,6 +15,7 @@ services:
       # Tell the PipeWire library inside the container where to find the socket
       - PIPEWIRE_RUNTIME_DIR=/tmp
       - PIPEWIRE_REMOTE=pipewire-0
+      - USE_ALSA=false # set to true to use ALSA bridge (best for dynamic sample rates, but adds latency)
       # Target your DX5 specifically
       - PIPEWIRE_NODE=alsa_output.usb-Topping_DX5-00.analog-stereo
       - SQUEEZE_EXTRA=-a 16384:8:24:0 -b 8000:12000 -D 500

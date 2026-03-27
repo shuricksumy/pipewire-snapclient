@@ -1,70 +1,82 @@
 #!/bin/bash
 
+# --- CONFIGURATION ---
+TARGET_USER="dietpi"  # Set your desired user here
+HOME_DIR="/home/$TARGET_USER"
+
+echo ">>> Starting Audiophile Environment Setup for user: $TARGET_USER"
+
 # --- 0. INSTALLATION ---
-# Install PipeWire, the Session Manager (WirePlumber), and Audio Tools
 echo ">>> Installing PipeWire and Audiophile Tools..."
 sudo apt update
 sudo apt install -y pipewire pipewire-audio-client-libraries \
     wireplumber pipewire-pulse alsa-utils pulseaudio-utils rtkit-daemon
 
 # --- 1. USER SETUP ---
-# Create a dedicated 'pipewire' user for the audio engine
-echo ">>> Creating dedicated audio user..."
-sudo useradd -m -s /bin/bash pipewire || echo "User already exists"
-sudo usermod -aG audio,video,rtkit pipewire
+# Check if user exists; if not, create.
+if id "$TARGET_USER" &>/dev/null; then
+    echo ">>> User '$TARGET_USER' already exists. Updating groups..."
+else
+    echo ">>> Creating dedicated audio user '$TARGET_USER'..."
+    sudo useradd -m -s /bin/bash "$TARGET_USER"
+fi
 
-# Enable 'lingering' so PipeWire starts on boot without needing a GUI login
-echo ">>> Enabling service lingering for user 'pipewire'..."
-sudo loginctl enable-linger pipewire
+# Add to necessary groups for Real-Time and Hardware access
+sudo usermod -aG audio,video,rtkit "$TARGET_USER"
+
+# Enable 'lingering' so PipeWire stays alive after logout
+echo ">>> Enabling service lingering for '$TARGET_USER'..."
+sudo loginctl enable-linger "$TARGET_USER"
+
+# Get the UID for pathing
+USER_UID=$(id -u "$TARGET_USER")
 
 # --- 2. ENVIRONMENT CONFIG ---
-# Ensure the user session knows where its runtime bus is
-echo ">>> Configuring user profile..."
-sudo -u pipewire bash -c "grep -q 'XDG_RUNTIME_DIR' ~/.bashrc || echo 'export XDG_RUNTIME_DIR=/run/user/\$(id -u)' >> ~/.bashrc"
+# Ensure runtime directory exists for headless systemd access
+sudo mkdir -p "/run/user/$USER_UID"
+sudo chown "$TARGET_USER:$TARGET_USER" "/run/user/$USER_UID"
+
+# Add XDG_RUNTIME_DIR to .bashrc if not already there
+if ! sudo -u "$TARGET_USER" grep -q "XDG_RUNTIME_DIR" "$HOME_DIR/.bashrc"; then
+    echo "export XDG_RUNTIME_DIR=/run/user/\$(id -u)" | sudo -u "$TARGET_USER" tee -a "$HOME_DIR/.bashrc"
+fi
 
 # --- 3. BIT-PERFECT CONFIGURATION ---
-# Create the config directory for the 'pipewire' user
 echo ">>> Applying Audiophile Bit-Perfect Config..."
-sudo -u pipewire mkdir -p /home/pipewire/.config/pipewire/pipewire.conf.d/
+CONF_DIR="$HOME_DIR/.config/pipewire/pipewire.conf.d"
+sudo -u "$TARGET_USER" mkdir -p "$CONF_DIR"
 
-# Create the bit-perfect override
-sudo -u pipewire tee /home/pipewire/.config/pipewire/pipewire.conf.d/bitperfect.conf <<EOF
+# Writing the config using your specific structure
+sudo -u "$TARGET_USER" tee "$CONF_DIR/bitperfect.conf" <<EOF
 context.properties = {
-    ## Bit-Perfect Switching: Start at 44.1k, allow up to 384k for Topping DX5
-    default.clock.rate          = 44100
+    ## Default when no audio is playing
+    default.clock.rate          = 48000
+    ## The rates the hardware is allowed to switch to
     default.clock.allowed-rates = [ 44100 48000 88200 96000 176400 192000 352800 384000 ]
     
-    ## Latency & Stability (Quantum)
     default.clock.min-quantum   = 32
     default.clock.max-quantum   = 8192
-    
-    ## High-Quality Path & Resampling
-    stream.properties = {
-        resample.quality      = 14
-        channelmix.normalize  = false
-        channelmix.mix-lfe    = false
-    }
 }
 
-context.modules = [
-    { name = libpipewire-module-rt
-        args = {
-            nice.level   = -11
-            rt.prio      = 88
-        }
-        flags = [ ifexists nofail ]
-    }
-]
+# Placed OUTSIDE context.properties for correct scope
+stream.properties = {
+    resample.quality      = 14
+    channelmix.normalize  = false
+    channelmix.mix-lfe    = false
+}
 EOF
 
 # --- 4. START SERVICES ---
-# We force the user services to start immediately
-echo ">>> Starting PipeWire Services..."
-PIPE_UID=$(id -u pipewire)
-sudo -u pipewire XDG_RUNTIME_DIR=/run/user/$PIPE_UID systemctl --user enable --now pipewire pipewire-pulse wireplumber
+echo ">>> Starting PipeWire Services for $TARGET_USER..."
+# Execute via sudo as the target user, pointing to the correct runtime bus
+export RUN_CMD="sudo -u $TARGET_USER XDG_RUNTIME_DIR=/run/user/$USER_UID"
+
+$RUN_CMD systemctl --user daemon-reload
+$RUN_CMD systemctl --user enable --now pipewire pipewire-pulse wireplumber
 
 echo "--------------------------------------------------------"
-echo "  SETUP COMPLETE! Topping DX5 is ready for Hi-Fi.       "
+echo "  SETUP COMPLETE! DX3/DX5 is ready for Hi-Fi.          "
+echo "  Target User: $TARGET_USER (UID: $USER_UID)           "
 echo "--------------------------------------------------------"
 
 # --- 5. USEFUL DIAGNOSTIC COMMANDS ---
@@ -72,19 +84,16 @@ cat <<EOF
 
 --- AUDIO STATION TOOLKIT ---
 
-Check if Topping DX5 is Default Output:
-  sudo -u pipewire wpctl status
+To run these commands as $TARGET_USER, use: 
+sudo -u $TARGET_USER XDG_RUNTIME_DIR=/run/user/$USER_UID [command]
 
-Monitor Sample Rate & Bit-Depth (Real-Time):
-  sudo -u pipewire pw-top
-
-Check Hardware Level Clock/Format (The Truth):
+Check Hardware Level Clock (The Truth):
   cat /proc/asound/card*/pcm0p/sub0/hw_params
 
-Play a High-Res File to test:
-  sudo -u pipewire pw-play --target [ID] /path/to/music.flac
+Monitor Sample Rate & Bit-Depth:
+  pw-top
 
-View Active Settings:
-  sudo -u pipewire pw-metadata -n settings
+Check Device Status:
+  wpctl status
 
 EOF

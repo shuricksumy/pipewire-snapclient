@@ -140,6 +140,8 @@ snapclient-dx5:
 |CLIENT_ID|Snap-Node|(Client only) Name appearing in the Web UI.|
 |PIPEWIRE_NODE|50 or {name}|(Client only) The target output string from wpctl status.|
 |PIPEWIRE_LATENCY|2048/192000|Defines the buffer size and sample rate.|
+|USE_ALSA| false | Set to true to use ALSA bridge (best for dynamic sample rates, but adds latency)|
+
 
 ## 🏗️ Build Requirements
 
