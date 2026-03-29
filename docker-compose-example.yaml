@@ -17,5 +17,4 @@ services:
       - USE_ALSA=false # set to true to use ALSA bridge (best for dynamic sample rates, but adds latency)
       - PIPEWIRE_NODE=alsa_output.usb-Topping_DX5-00.analog-stereo
       - PIPEWIRE_LATENCY=2048/192000
-      - SNAP_EXTRA=--hostID DX5-Snapcast
     restart: unless-stopped

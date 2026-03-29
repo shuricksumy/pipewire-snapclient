@@ -10,7 +10,6 @@ services:
     environment:
       - ROLE=snapserver
       - SNAP_PORT=1704
-      - EXTRA_ARGS=-v # Verbose logging for troubleshooting
       
     volumes:
       # 1. Persistent configuration (streams, client names, etc.)
