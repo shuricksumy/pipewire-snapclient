@@ -41,6 +41,7 @@ elif [ "$ROLE" = "snapclient" ]; then
 
     if [ -n "$TARGET_ID" ]; then
         log "INFO" "Found Sink ID: $TARGET_ID. Setting volume to 1.0"
+        wpctl set-mute "$TARGET_ID" 0
         wpctl set-volume "$TARGET_ID" 1.0
     else
         log "WARN" "Could not trace stream $PLAYER_NAME to a hardware sink. Using default."
