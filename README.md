@@ -176,6 +176,7 @@ snapclient-dx5:
 |PIPEWIRE_NODE|50 or {name}|(Client only) The target output string from wpctl status.|
 |PIPEWIRE_LATENCY|2048/192000|Defines the buffer size and sample rate.|
 |USE_ALSA| false | Set to true to use ALSA bridge (best for dynamic sample rates, but adds latency)|
+|INIT_VOL| Initial volume level (0.0 to 1.0) |See Compose|
 
 
 ## 🏗️ Build Requirements

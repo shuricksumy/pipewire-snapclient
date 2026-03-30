@@ -10,6 +10,9 @@ ROLE="${ROLE:-snapclient}"
 SNAP_PORT="${SNAP_PORT:-1704}"
 USE_ALSA="${USE_ALSA:-false}"
 
+# If INIT_VOL is not set or empty, default to 1.0
+VOLUME_SETTING="${INIT_VOL:-1.0}"
+
 # --- ROLE: SNAPSERVER ---
 if [ "$ROLE" = "snapserver" ]; then
     log "INFO" "Setting up Snapserver environment..."
@@ -40,12 +43,12 @@ elif [ "$ROLE" = "snapclient" ]; then
     TARGET_ID=$(wpctl status | grep -A 20 "Sinks:" | grep "${PLAYER_NAME}" | grep -oE '[0-9]+' | head -n 1)
 
     if [ -n "$TARGET_ID" ]; then
-        log "INFO" "Found Sink ID: $TARGET_ID. Setting volume to 1.0"
+        log "INFO" "Found Sink ID: $TARGET_ID. Setting volume to $VOLUME_SETTING"
         wpctl set-mute "$TARGET_ID" 0
-        wpctl set-volume "$TARGET_ID" 1.0
+        wpctl set-volume "$TARGET_ID" "$VOLUME_SETTING"
     else
         log "WARN" "Could not trace stream $PLAYER_NAME to a hardware sink. Using default."
-        wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0 || true
+        wpctl set-volume @DEFAULT_AUDIO_SINK@ "$VOLUME_SETTING" || true
     fi
 
     # 4. Build Connection URI
