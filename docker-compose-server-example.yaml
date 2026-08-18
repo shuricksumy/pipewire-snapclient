@@ -1,28 +1,36 @@
+# Server role, published image. See README.md for the full variable table.
 services:
   snapserver:
     image: ghcr.io/shuricksumy/snapcast-pipewire:latest
     container_name: snapserver
     restart: unless-stopped
-    
-    # Host mode is required for Avahi/mDNS discovery to work across the network
+
+    # Host mode is required for the Snapcast apps to reach the control/web ports
+    # on the LAN without per-port publishing.
     network_mode: host
 
     environment:
       - ROLE=snapserver
       - SNAP_PORT=1704
-      
+      #- EXTRA_ARGS=--server.threads=4   # appended to the snapserver command line
+
     volumes:
       # 1. Persistent configuration (streams, client names, etc.)
+      #    The image runs as uid/gid 1000, so this directory must be owned by it:
+      #        mkdir -p snapserver_config && sudo chown -R 1000:1000 snapserver_config
+      #    snapserver.conf is seeded from the image on first run and yours wins after that.
       - ./snapserver_config:/config
-      
-      # 2. Shared Named Pipes (FIFOs)
-      # This allows other containers to write audio data to Snapserver
+
+      # 2. Shared named pipes (FIFOs). The host directory /tmp/snapfifo is mounted
+      #    as the container's /tmp, so the `pipe:///tmp/snapfifo...` sources in
+      #    snapserver.conf resolve to /tmp/snapfifo/snapfifo* on the host -- which is
+      #    where producer containers (LedFx, librespot, ffmpeg) should write.
       - /tmp/snapfifo:/tmp
-      
+
       # 3. Timezone synchronization
       - /etc/localtime:/etc/localtime:ro
 
-    # Optional: Resource constraints for high-res audio stability
+    # Optional: resource constraints for high-res audio stability
     deploy:
       resources:
         limits:
