@@ -1,24 +1,37 @@
+# Local build of the client role. `docker compose up --build`
 services:
-  squeezelite-dx5:
+  snapclient-dx5:
     build: .
-    container_name: squeezelite-dx5
+    container_name: snapclient-dx5
     network_mode: host
+
+    # The image runs as uid/gid 1000, which must match the owner of the PipeWire
+    # socket mounted below (normally your desktop user -- check with `id -u`).
+    # Uncomment and adjust if your host user is not 1000.
+    #user: "1000:1000"
+
     volumes:
       # Map the PipeWire socket from your host into the container
       - /run/user/1000/pipewire-0:/tmp/pipewire-0
+      # Required for PipeWire's shared-memory transport
       - /dev/shm:/dev/shm
+
     environment:
-      - PLAYER_NAME=DX5 # part of name like in wpctl status Audio - to set volume
-      - CLIENT_ID=DX5-Snapclient
-      - SERVER_IP=192.168.111.111:3483
-      - SERVER_PORT=1704
+      - ROLE=snapclient
+      - SERVER_IP=192.168.111.111   # Snapserver host (bare IP, host:port, or tcp://host:port)
+      - SNAP_PORT=1704              # Snapserver stream port
+      - CLIENT_ID=DX5-Snapclient    # Name shown in the Snapcast web UI
+      - PLAYER_NAME=DX5             # Part of the sink name in `wpctl status` -- used to set volume
+      - INIT_VOL=0.5                # Initial volume level (0.0 to 1.0)
       # Tell the PipeWire library inside the container where to find the socket
       - PIPEWIRE_RUNTIME_DIR=/tmp
       - PIPEWIRE_REMOTE=pipewire-0
-      - USE_ALSA=false # set to true to use ALSA bridge (best for dynamic sample rates, but adds latency)
-      # Target your DX5 specifically
+      # Target your DX5 specifically (node.name from `pw-cli ls Node`)
       - PIPEWIRE_NODE=alsa_output.usb-Topping_DX5-00.analog-stereo
-      - INIT_VOL=0.5 # Initial volume level (0.0 to 1.0)  
+      - PIPEWIRE_LATENCY=2048/192000
+      - USE_ALSA=false              # true routes through the ALSA->PipeWire bridge instead
+      - DEBUG=false                 # true enables `set -x` tracing in the entrypoint
+
     cap_add:
       - SYS_NICE
     ulimits:
