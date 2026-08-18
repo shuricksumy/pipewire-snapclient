@@ -9,3 +9,9 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # One PR for all action bumps instead of one per action -- the first round of
+    # these opened seven separate PRs that each had to be merged by hand.
+    groups:
+      github-actions:
+        patterns:
+          - "*"

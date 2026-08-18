@@ -12,8 +12,17 @@ on:
     paths-ignore:
       - '.github/**'
       - '*.md'
+      # Not part of the image (see .dockerignore) - editing them should not republish it
+      - 'docker-compose*.yaml'
+      - 'docker-compose*.yml'
+      - 'JBL-fix.sh'
+      - 'ubuntu-pipewire-install-on-host.sh'
   release:
     types: [published]
+  # Rebuild weekly so Debian security updates reach the published image even when
+  # there are no commits (paths-ignore above only applies to push events).
+  schedule:
+    - cron: '0 4 * * 1'
   workflow_dispatch:
     inputs:
       tag_name:
@@ -33,9 +42,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -49,6 +55,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The Snapcast .deb packages are pulled from the upstream release at build
+      # time. Resolving the tag here (authenticated) keeps the in-build API call
+      # off the anonymous rate limit and makes the version visible in the build
+      # log. REFRESH_WEEK changes every ISO week so the scheduled rebuild re-runs
+      # apt instead of restoring a stale layer from the GHA cache.
+      - name: Resolve build inputs
+        id: inputs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          snapcast="$(gh api repos/snapcast/snapcast/releases/latest --jq .tag_name)"
+          week="$(date -u +%G-W%V)"
+          echo "snapcast_version=$snapcast" >> "$GITHUB_OUTPUT"
+          echo "refresh_week=$week" >> "$GITHUB_OUTPUT"
+          echo "Snapcast $snapcast | cache epoch $week"
 
       - name: Docker metadata
         id: meta
@@ -73,6 +96,9 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
+          build-args: |
+            SNAPCAST_VERSION=${{ steps.inputs.outputs.snapcast_version }}
+            REFRESH_WEEK=${{ steps.inputs.outputs.refresh_week }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -98,6 +124,10 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          # Debian carries a large backlog of CVEs it has not patched; reporting them
+          # buries the ones we can actually act on (a rebuild picks up the fix).
+          # Only alert on vulnerabilities that have a fixed version available.
+          ignore-unfixed: true
           exit-code: "0"
 
       - name: Upload Trivy results to the Security tab
