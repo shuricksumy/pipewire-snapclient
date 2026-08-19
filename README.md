@@ -2,7 +2,62 @@
 
 [![Build_Push_Scan](https://github.com/shuricksumy/pipewire-snapclient/actions/workflows/build.yml/badge.svg)](https://github.com/shuricksumy/pipewire-snapclient/actions/workflows/build.yml)
 
-A high-performance, multi-architecture (amd64, arm64) Docker container running Snapcast v0.35.0 with native PipeWire support. Optimized for bit-perfect audio delivery to high-end DACs like the Topping DX5.
+A high-performance, multi-architecture (amd64, arm64) Docker container running Snapcast with native PipeWire support. Optimized for bit-perfect audio delivery to high-end DACs like the Topping DX5.
+
+## 🎯 Why this exists
+
+[**Music Assistant**](https://www.music-assistant.io/) is the library and streaming brain — Spotify, Plex, local files, radio — and Home Assistant drives it. What it cannot do on its own is put audio into a **USB DAC plugged into some other Linux box**, at the original sample rate, in sync with the rest of the house.
+
+Music Assistant solves the "in sync with the rest of the house" half with its
+[Snapcast provider](https://www.music-assistant.io/player-support/snapcast/): it ships a built-in
+Snapserver and streams synchronised audio to any [Snapcast](https://github.com/snapcast/snapcast)
+client on the network.
+
+**This image is the client for the hi-fi end of that chain.** It plays straight into the host's
+PipeWire session instead of grabbing an ALSA device, so the DAC follows the source rate
+(44.1 kHz stays 44.1 kHz, no resampling), and the volume lands on the real hardware sink.
+
+```mermaid
+flowchart LR
+    subgraph MA["🎵 Music Assistant"]
+        LIB["Spotify · Plex<br/>local library · radio"] --> SS["built-in<br/>Snapserver"]
+    end
+
+    SS -- "TCP 1704<br/>synced audio" --> SC["<b>this image</b><br/>ROLE=snapclient"]
+    SC -- "PipeWire socket" --> PW["host PipeWire"]
+    PW --> DAC["🔊 USB DAC<br/>Topping DX5"]
+
+    SS -. "other rooms" .-> OTHER["Snapdroid · snapweb<br/>ESP32 · Raspberry Pi"]
+
+    style SC stroke-width:3px
+```
+
+### Use it with Music Assistant
+
+**The normal way — let Music Assistant be the server.** Add the Snapcast provider in MA
+(`Settings → Player Providers → Add → Snapcast`) and leave the built-in server on. Then point this
+container at the MA host and nothing else:
+
+```yaml
+environment:
+  - ROLE=snapclient
+  - SERVER_IP=192.168.1.50   # your Music Assistant host
+  - SNAP_PORT=1704
+  - CLIENT_ID=Lounge-DX5     # the name you will see in Music Assistant
+```
+
+The client appears under the Snapcast provider in MA within a few seconds and can be grouped with
+your other rooms. Full setup is in [🚀 Deployment](#-deployment-docker-compose).
+
+**The advanced way — run the server here too.** MA can use an external Snapserver instead
+(`ROLE=snapserver`), which is what you want when Snapcast, not MA, is the centre of your audio
+setup — e.g. LedFx or another producer also writes into the same FIFOs. Three things to know:
+
+| | |
+| :-- | :-- |
+| **Version** | MA needs snapserver ≥ 0.27.0 and specifically **cannot** use 0.30.0. This image tracks the latest upstream release (0.35.0 today). |
+| **Ports** | 1704, 1705 **and the 4953–5153 range** must be reachable — MA creates a stream per player in that range. `network_mode: host` is the simple answer. |
+| **Stream name** | MA requires a stream named `default`. [`snapserver.conf`](snapserver.conf) here ships `Default` — rename it if you go this route. |
 
 ## Features
 - Dual Role Strategy: Use a single image for both snapserver and snapclient.
