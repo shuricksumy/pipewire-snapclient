@@ -21,7 +21,7 @@ A high-performance, multi-architecture (amd64, arm64) Docker container running S
 
 - Maintained Image: Rebuilt weekly so Debian security updates and new Snapcast releases land without a commit, and scanned with Trivy on every push.
 
-- Healthcheck: Reports unhealthy when the snapcast process for the configured role is gone, so a wedged client is visible to Docker instead of just looking "up".
+- Healthcheck: Reports unhealthy when the snapcast process for the configured role is gone. Note this tracks the *process*, not the connection — a client retrying against an unreachable server still reports healthy, because it is alive and doing exactly what it should.
 
 > **Note on discovery:** this image does not run `avahi-daemon`, so mDNS/Zeroconf announcement is not available. Point clients at `SERVER_IP` explicitly. (`snapserver` logs a harmless `Avahi: Failed to create client` line at startup.)
 

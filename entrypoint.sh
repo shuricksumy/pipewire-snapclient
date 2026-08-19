@@ -143,6 +143,15 @@ while true; do
     fi
 
     log "WARN" "Snapclient exited. Retrying in ${RETRY_DELAY}s..."
-    sleep "$RETRY_DELAY"
+
+    # Sleep in the background and wait on it. bash only runs a trap once the
+    # current *foreground* command has finished -- `wait` is interrupted
+    # immediately, a plain `sleep` is not -- so backgrounding it is what keeps
+    # `docker stop` from having to wait out the whole backoff.
+    sleep "$RETRY_DELAY" &
+    CHILD_PID=$!
+    wait "$CHILD_PID"
+    CHILD_PID=""
+
     RETRY_DELAY=$(( RETRY_DELAY * 2 > MAX_DELAY ? MAX_DELAY : RETRY_DELAY * 2 ))
 done
