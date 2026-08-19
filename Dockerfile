@@ -162,7 +162,12 @@ ENV ROLE="snapclient" \
     SNAP_EXTRA="" \
     HOME="/home/snapcast"
 
-USER 1000:1000
+# Named, not numeric: Docker only applies supplementary groups (i.e. the audio
+# group added above, needed for the /dev/snd passthrough in USE_ALSA mode) when
+# USER is a name it can look up in /etc/passwd. "USER 1000:1000" silently drops
+# them. A compose override such as `user: "1003:1003"` is numeric and drops them
+# again, which is what `group_add: audio` in the compose files is for.
+USER snapcast
 
 # Report unhealthy once the snapcast process for this role is gone -- the client
 # entrypoint keeps the container alive across reconnects, so a container that is
