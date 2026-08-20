@@ -100,7 +100,7 @@
      do nothing on an inline element, so as a <span> it wrapped onto three lines
      instead of truncating. */
   .sink {
-    display: block; min-width: 0; max-width: 26rem;
+    display: block; min-width: 0; max-width: 15rem;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
     color: var(--muted);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -157,7 +157,7 @@
     width: 30px; height: 30px; border-radius: 5px; object-fit: cover;
     flex: 0 0 auto; background: var(--line);
   }
-  .np-text { min-width: 0; flex: 1 1 auto; }
+  .np-text { min-width: 0; flex: 1 1 auto; max-width: 16rem; }
   .np-title { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .np-artist { font-size: .74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* One tidy strip: skip/volume together on a single line under the text.

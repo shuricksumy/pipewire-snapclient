@@ -480,3 +480,11 @@ def test_an_alsa_player_rejects_a_bad_device(client):
     res = create(client, output_mode="alsa", alsa_device="not a device", node="")
     assert res.status_code == 400
     assert "alsa" in res.get_json()["error"].lower()
+
+
+def test_truncated_values_stay_readable_on_hover():
+    """The output column is deliberately short, so the full node name has to be
+    on the element's title -- otherwise it is simply lost."""
+    page = open(INDEX).read()
+    for cls in ("sink", "np-title", "np-artist"):
+        assert 'class="%s" title=' % cls in page, cls
