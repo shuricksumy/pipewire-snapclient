@@ -17,6 +17,9 @@
     --warn: #9a6700;
     --bad: #b42318;
     --chip: #eef1f5;
+    --okbg: #e6f4ec;
+    --warnbg: #fdf3dd;
+    --badbg: #fdeceb;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -30,6 +33,9 @@
       --warn: #e0b341;
       --bad: #ff7a70;
       --chip: #262b33;
+      --okbg: #17301f;
+      --warnbg: #33290f;
+      --badbg: #3a1d1b;
     }
   }
   * { box-sizing: border-box; }
@@ -50,6 +56,9 @@
   }
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  /* The player name is the one thing allowed to wrap; everything else is
+     capped so the fixed-width actions column is never clipped. */
+  td:first-child { max-width: 20rem; }
   th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
   tr:last-child td { border-bottom: 0; }
   .wrap { overflow-x: auto; }
@@ -71,11 +80,6 @@
   .row { display: flex; align-items: center; gap: 8px; }
   .muted { color: var(--muted); }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .state { font-weight: 600; }
-  .state.running { color: var(--ok); }
-  .state.stopped { color: var(--muted); }
-  .state.waiting, .state.backoff, .state.starting { color: var(--warn); }
-  .state.failed { color: var(--bad); }
   .meta { font-size: 12px; color: var(--muted); }
   .badge {
     font-size: 11px; padding: 1px 6px; border-radius: 999px;
@@ -106,9 +110,49 @@
   }
   #toast.bad { border-left-color: var(--bad); }
   .empty { color: var(--muted); padding: 12px 4px; }
-  .np { display: flex; flex-direction: column; gap: 2px; }
-  .np-title { font-weight: 600; }
-  .vol { width: 110px; }
+
+  /* The node name is long enough to wrap a cell onto three lines and shove the
+     other columns around, so it is truncated with the full value in title=. */
+  .sink {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    color: var(--muted); max-width: 16rem;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .state-cell, .actions-cell { white-space: nowrap; }
+  /* One row of buttons, not two: the actions column is the last thing that
+     should reflow when a track title gets longer. */
+  .actions-cell .grp { flex-wrap: nowrap; justify-content: flex-end; }
+  .actions-cell button { padding: 5px 8px; }
+  /* The node name truncates; the badge next to it must not be squeezed away. */
+  .sink-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .sink-row .badge { flex: 0 0 auto; }
+  .state {
+    font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    background: var(--chip);
+  }
+  .state.running { background: var(--okbg); color: var(--ok); }
+  .state.stopped { background: var(--line); color: var(--muted); }
+  .state.waiting, .state.backoff, .state.starting { background: var(--warnbg); color: var(--warn); }
+  .state.failed { background: var(--badbg); color: var(--bad); }
+
+  /* Now playing: art, text and transport on one line; volume on its own below.
+     Without the nowrap on .transport the mute button drops to a second row as
+     soon as the track title is long. */
+  .np { display: flex; align-items: center; gap: 9px; }
+  .np img {
+    width: 38px; height: 38px; border-radius: 5px; object-fit: cover;
+    flex: 0 0 auto; background: var(--line);
+  }
+  /* min-width:0 is what lets the ellipsis actually kick in inside a flex row. */
+  .np-text { min-width: 0; flex: 1 1 auto; max-width: 14rem; }
+  .np-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .transport { display: flex; gap: 3px; flex: 0 0 auto; white-space: nowrap; }
+  .transport button { padding: 4px 7px; font-size: 14px; line-height: 1; }
+  .vol { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
+  .vol button { padding: 3px 6px; line-height: 1; }
+  .vol input[type=range] { width: 7.5rem; accent-color: var(--accent); }
+  .vol span { font-size: 12px; color: var(--muted); min-width: 2.6rem; }
 </style>
 </head>
 <body>
@@ -277,39 +321,63 @@
   // ---- rendering ------------------------------------------------------------
 
   function nowPlaying(p) {
-    // A stopped player shows nothing: a leftover track and live transport
-    // buttons next to a stopped player read as if it were still playing.
-    if (!p.running) return '<span class="muted">&mdash;</span>';
-    if (p.snapcast_error) return `<span class="meta">${esc(p.snapcast_error)}</span>`;
-    const s = p.snapcast;
-    if (!s) return '<span class="muted">not connected to the server</span>';
-
-    const bits = [];
-    if (s.title) {
-      bits.push(`<div class="np-title">${esc(s.title)}</div>`);
-      const sub = [s.artist, s.album].filter(Boolean).map(esc).join(" &middot; ");
-      if (sub) bits.push(`<div class="meta">${sub}</div>`);
-    } else {
-      bits.push(`<div class="meta">${esc(s.stream_id || "no stream")}` +
-        (s.playback_status ? ` &middot; ${esc(s.playback_status)}` : "") + `</div>`);
+    // A stopped player has no snapclient process, so it is not playing anything
+    // and its transport would be acting on a client that is not there. The
+    // snapserver still remembers the client and its last stream, so without this
+    // the row keeps showing a track for a player that is plainly stopped.
+    if (!p.running) {
+      return `<span class="muted">${p.state === "stopped" ? "player stopped"
+                                  : "player " + esc(p.state)}</span>`;
     }
-    return `<div class="np">${bits.join("")}</div>`;
-  }
-
-  function transport(p) {
-    if (!p.running || !p.snapcast) return "";
+    if (p.snapcast_error) return `<span class="muted">${esc(p.snapcast_error)}</span>`;
     const s = p.snapcast;
-    const out = [];
+    if (!s) return '<span class="muted">not known to the snapserver yet</span>';
+    if (s.connected === false) {
+      return '<span class="muted">not connected to the snapserver</span>';
+    }
+
+    // Paused is NOT "nothing to control": Music Assistant parks the group on a
+    // stream that reports canControl=false, so the panel keeps driving the last
+    // controllable stream and labels the row instead of dropping the buttons --
+    // otherwise there is no way to resume from here.
+    const paused = s.attached === false;
+    const full = [s.title, s.artist, s.album].filter(Boolean).join(" — ");
+    const art = s.art_url
+      ? `<img src="${esc(s.art_url)}" alt="" title="${esc(full)}" onerror="this.style.display='none'">`
+      : "";
+    // The cell is narrow and the text is ellipsised, so the full strings go in
+    // title= -- hovering a truncated track name shows all of it.
+    const text = s.title
+      ? `<div class="np-title" title="${esc(full)}">${esc(s.title)}</div>` +
+        `<div class="np-artist" title="${esc(full)}">${paused ? "paused &middot; " : ""}` +
+        `${esc(s.artist || s.album || "")}</div>`
+      : `<div class="np-artist" title="${esc(s.stream_id || "")}">` +
+        `${esc(s.stream_id || "no stream")} &mdash; ${esc(s.stream_status || "idle")}</div>`;
+
+    // Only offer what this stream says it supports; the flags differ per stream
+    // and change at runtime. A plain pipe stream gets no buttons at all.
+    let controls = "";
     if (s.can_control) {
-      if (s.can_prev) out.push(`<button data-cmd="previous" title="Previous">&#9198;</button>`);
-      out.push(`<button data-cmd="playPause" title="Play / pause">&#9199;</button>`);
-      if (s.can_next) out.push(`<button data-cmd="next" title="Next">&#9197;</button>`);
+      const playing = s.playback_status === "playing" && !paused;
+      const b = (cmd, glyph, on, label) =>
+        `<button data-cmd="${cmd}" ${on ? "" : "disabled"} title="${label}">${glyph}</button>`;
+      controls =
+        `<span class="transport">` +
+        b("previous", "&#9198;", s.can_prev, "Previous") +
+        (playing ? b("pause", "&#9208;", s.can_pause, "Pause")
+                 : b("play", "&#9205;", true, "Play")) +
+        b("next", "&#9197;", s.can_next, "Next") +
+        `</span>`;
     }
-    if (s.volume !== null && s.volume !== undefined) {
-      out.push(`<input type="range" class="vol" min="0" max="100" value="${Number(s.volume)}" title="Volume">`);
-      out.push(`<button data-mute="${s.muted ? 1 : 0}" title="Mute">${s.muted ? "&#128263;" : "&#128266;"}</button>`);
-    }
-    return out.length ? `<div class="grp" style="margin-top:6px">${out.join("")}</div>` : "";
+
+    const vol = (s.volume === null || s.volume === undefined) ? "" :
+      `<div class="vol">
+         <button data-mute="${s.muted ? 1 : 0}" title="${s.muted ? "Unmute" : "Mute"}">${s.muted ? "&#128263;" : "&#128266;"}</button>
+         <input type="range" min="0" max="100" value="${Number(s.volume)}">
+         <span>${Number(s.volume)}%</span>
+       </div>`;
+
+    return `<div class="np">${art}<div class="np-text">${text}</div>${controls}</div>${vol}`;
   }
 
   function snapwebLink(p) {
@@ -330,8 +398,8 @@
       // An absent sink is the normal state for a powered-off DAC, so say so
       // plainly rather than flagging it as an error.
       const sink = p.node
-        ? `<span class="mono">${esc(p.node)}</span>` +
-          (p.node_present === false ? ` <span class="badge absent">absent</span>` : "")
+        ? `<div class="sink-row"><div class="sink" title="${esc(p.node)}">${esc(p.node)}</div>` +
+          (p.node_present === false ? `<span class="badge absent">absent</span>` : "") + `</div>`
         : `<span class="muted">default sink</span>`;
       const meta = p.running
         ? `<span class="meta"> up ${secs(p.uptime)}</span>`
@@ -340,12 +408,12 @@
       tr.innerHTML =
         `<td><b>${esc(p.name)}</b>` +
           (p.client_id !== p.name ? ` <span class="badge">${esc(p.client_id)}</span>` : "") +
-          `<div class="meta">${sink}</div></td>` +
-        `<td>${nowPlaying(p)}${transport(p)}</td>` +
-        `<td><span class="state ${esc(p.state)}">${esc(p.state)}</span>${meta}` +
+          sink + `</td>` +
+        `<td>${nowPlaying(p)}</td>` +
+        `<td class="state-cell"><span class="state ${esc(p.state)}">${esc(p.state)}</span>${meta}` +
           (p.detail ? `<div class="meta">${esc(p.detail)}</div>` : "") +
           `<div class="meta">${esc(p.server)}:${Number(p.port)}</div></td>` +
-        `<td><span class="grp">` +
+        `<td class="actions-cell"><span class="grp">` +
           (p.running || p.state === "waiting" || p.state === "backoff"
             ? `<button data-do="stop">Stop</button><button data-do="restart">Restart</button>`
             : `<button data-do="start" class="primary">Start</button>`) +
