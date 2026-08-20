@@ -16,17 +16,39 @@ USE_ALSA="${USE_ALSA:-false}"
 PLAYER_NAME="${PLAYER_NAME:-}"
 VOLUME_SETTING="${INIT_VOL:-1.0}"
 
-# --- ROLE: SNAPSERVER ---
-if [ "$ROLE" = "snapserver" ]; then
-    CONFIG_FILE="/config/snapserver.conf"
-
+# Both the snapserver and panel roles keep state in /config.
+require_writable_config() {
     if ! mkdir -p /config 2>/dev/null || [ ! -w /config ]; then
         log "ERROR" "/config is not writable by uid $(id -u)."
         log "ERROR" "This image runs unprivileged. Fix the host directory once with:"
-        log "ERROR" "    sudo chown -R 1000:1000 ./snapserver_config"
+        log "ERROR" "    sudo chown -R 1000:1000 ./$1"
         log "ERROR" "or pin the container to a different uid with 'user:' in compose."
         exit 1
     fi
+}
+
+# --- ROLE: PANEL ---
+# The web panel supervises snapclient players itself, several per container,
+# each with its own PIPEWIRE_NODE. It does not run snapclient from here.
+if [ "$ROLE" = "panel" ]; then
+    require_writable_config "panel_config"
+
+    PW_SOCKET="${PIPEWIRE_RUNTIME_DIR:-/tmp}/${PIPEWIRE_REMOTE:-pipewire-0}"
+    if [ ! -S "$PW_SOCKET" ]; then
+        log "WARN" "PipeWire socket not found at $PW_SOCKET."
+        log "WARN" "The panel will start, but it cannot list outputs or play anything."
+        log "WARN" "Check the bind mount, e.g. '/run/user/1000/pipewire-0:/tmp/pipewire-0'."
+    fi
+
+    log "INFO" "Launching the player panel on port ${PORT:-8080}..."
+    cd /app || exit 1
+    exec python3 /app/app.py
+
+# --- ROLE: SNAPSERVER ---
+elif [ "$ROLE" = "snapserver" ]; then
+    CONFIG_FILE="/config/snapserver.conf"
+
+    require_writable_config "snapserver_config"
 
     # Seed from the tuned config baked into the image on first run only; after
     # that the copy in the volume wins so local edits survive image updates.
@@ -41,7 +63,7 @@ fi
 
 # --- ROLE: SNAPCLIENT ---
 if [ "$ROLE" != "snapclient" ]; then
-    log "ERROR" "Unknown ROLE '$ROLE' (expected 'snapclient' or 'snapserver')."
+    log "ERROR" "Unknown ROLE '$ROLE' (expected 'snapclient', 'snapserver' or 'panel')."
     exit 1
 fi
 

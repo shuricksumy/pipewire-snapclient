@@ -1,0 +1,49 @@
+# Web panel role: create, start, stop and supervise snapclient players from a
+# browser instead of editing this file and running `docker compose up` again.
+# See README.md for the full variable table.
+services:
+  snapcast-panel:
+    image: ghcr.io/shuricksumy/snapcast-pipewire:latest
+    container_name: snapcast-panel
+    network_mode: host
+
+    # The image runs as uid/gid 1000, which must match the owner of the PipeWire
+    # socket below (normally your desktop user -- check with `id -u`).
+    #user: "1000:1000"
+
+    # REQUIRED, not optional polish. Real-time scheduling is granted to the
+    # *container*, and every player is a child process of this one, so all of
+    # them inherit these limits. Without them each player runs at normal
+    # priority and audio glitches under load -- the same cap_add/ulimits the
+    # single-player role needs, just applied once here.
+    cap_add: [ SYS_NICE, IPC_LOCK ]
+    ulimits: { rtprio: 95, memlock: -1, msgqueue: 8192000 }
+    group_add: [ audio ]
+
+    volumes:
+      - /run/user/1000/pipewire-0:/tmp/pipewire-0
+      - /dev/shm:/dev/shm
+      # players.json lives here. Must be writable by uid 1000:
+      #     mkdir -p panel_config && sudo chown -R 1000:1000 panel_config
+      - ./panel_config:/config
+      # Optional: direct ALSA access as a fallback
+      #- /dev/snd:/dev/snd
+
+    environment:
+      - ROLE=panel
+      - PORT=8080                   # the panel listens here; browse http://<host>:8080/
+      # Seeds the Add-player form. Every player can override them, and the
+      # panel's own Settings dialog can change these defaults at runtime.
+      - SERVER_IP=192.168.111.50    # your Snapserver (or Music Assistant host)
+      - SNAP_PORT=1704              # stream port
+      - SNAP_CONTROL_PORT=1705      # JSON-RPC control port: now playing, transport
+      - SNAP_WEB_PORT=1780          # Snapweb, for the "Snapweb" link on each row
+      - PIPEWIRE_RUNTIME_DIR=/tmp
+      - PIPEWIRE_REMOTE=pipewire-0
+      - PIPEWIRE_LATENCY=2048/192000  # default for new players
+      # Optional HTTP Basic auth over every route, page included. Leave unset on
+      # a trusted LAN; set it before exposing the port anywhere else.
+      #- ADMIN_USER=admin
+      #- ADMIN_PASSWORD=change-me
+
+    restart: unless-stopped

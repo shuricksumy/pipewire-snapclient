@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Snapcast Player Panel</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f7f9;
+    --card: #ffffff;
+    --ink: #16181d;
+    --muted: #666e7a;
+    --line: #dfe3e8;
+    --accent: #2f6fed;
+    --ok: #1a7f45;
+    --warn: #9a6700;
+    --bad: #b42318;
+    --chip: #eef1f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --card: #1c1f25;
+      --ink: #e8eaed;
+      --muted: #9aa3ae;
+      --line: #2c313a;
+      --accent: #6f9dff;
+      --ok: #5bd08a;
+      --warn: #e0b341;
+      --bad: #ff7a70;
+      --chip: #262b33;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--card);
+  }
+  h1 { font-size: 18px; margin: 0; flex: 1; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  .wrap { overflow-x: auto; }
+  button {
+    font: inherit; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--chip); color: var(--ink);
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.danger { color: var(--bad); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .grp { display: flex; gap: 6px; flex-wrap: wrap; }
+  input, select {
+    font: inherit; padding: 6px 8px; border-radius: 7px; width: 100%;
+    border: 1px solid var(--line); background: var(--bg); color: var(--ink);
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .muted { color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  .state { font-weight: 600; }
+  .state.running { color: var(--ok); }
+  .state.stopped { color: var(--muted); }
+  .state.waiting, .state.backoff, .state.starting { color: var(--warn); }
+  .state.failed { color: var(--bad); }
+  .meta { font-size: 12px; color: var(--muted); }
+  .badge {
+    font-size: 11px; padding: 1px 6px; border-radius: 999px;
+    background: var(--chip); color: var(--muted); border: 1px solid var(--line);
+  }
+  .badge.absent { color: var(--bad); }
+  dialog {
+    border: 1px solid var(--line); border-radius: 12px; padding: 0;
+    background: var(--card); color: var(--ink); width: min(680px, 94vw);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg-head, .dlg-foot {
+    padding: 14px 16px; display: flex; gap: 8px; align-items: center;
+  }
+  .dlg-head { border-bottom: 1px solid var(--line); font-weight: 600; }
+  .dlg-foot { border-top: 1px solid var(--line); justify-content: flex-end; }
+  .dlg-body { padding: 16px; max-height: 70vh; overflow: auto; }
+  pre.logs {
+    margin: 0; padding: 12px; background: var(--bg); border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
+    white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto;
+  }
+  #toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+    max-width: 90vw; display: none;
+  }
+  #toast.bad { border-left-color: var(--bad); }
+  .empty { color: var(--muted); padding: 12px 4px; }
+  .np { display: flex; flex-direction: column; gap: 2px; }
+  .np-title { font-weight: 600; }
+  .vol { width: 110px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Snapcast Player Panel</h1>
+  <span id="serverChip" class="badge"></span>
+  <button id="btnSettings">Settings</button>
+  <button id="btnAdd" class="primary">Add player</button>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Players <span class="muted" id="playerCount"></span></h2>
+    <div class="wrap">
+      <table>
+        <thead>
+          <tr><th>Player</th><th>Now playing</th><th>State</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="empty" id="empty">No players yet. <b>Add player</b> creates one and starts it.</div>
+  </div>
+
+  <div class="card">
+    <h2>Outputs PipeWire is offering <span class="muted" id="sinkCount"></span></h2>
+    <div class="wrap"><table><tbody id="sinkRows"></tbody></table></div>
+    <div class="empty" id="sinkEmpty">
+      No sinks visible. Check that the PipeWire socket is mounted into this container.
+    </div>
+  </div>
+</main>
+
+<dialog id="dlgPlayer">
+  <form method="dialog" id="formPlayer">
+    <div class="dlg-head" id="dlgTitle">Add player</div>
+    <div class="dlg-body">
+      <div class="grid">
+        <div>
+          <label for="f_name">Name (shown here and on the server)</label>
+          <input id="f_name" required maxlength="64">
+        </div>
+        <div>
+          <label for="f_client_id">CLIENT_ID (--hostID, blank = name)</label>
+          <input id="f_client_id" maxlength="64">
+        </div>
+      </div>
+      <p></p>
+      <label for="f_node">Output sink (PIPEWIRE_NODE, blank = default sink)</label>
+      <div class="row">
+        <select id="f_node_pick" style="flex:1"></select>
+        <button type="button" id="btnRefreshSinks">Refresh</button>
+      </div>
+      <input id="f_node" class="mono" placeholder="alsa_output.usb-Topping_DX5-00.analog-stereo" style="margin-top:6px">
+      <p></p>
+      <div class="grid">
+        <div><label for="f_server">Snapserver (SERVER_IP)</label><input id="f_server" required></div>
+        <div><label for="f_port">Stream port (SNAP_PORT)</label><input id="f_port" type="number" min="1" max="65535"></div>
+        <div><label for="f_control_port">Control port</label><input id="f_control_port" type="number" min="1" max="65535"></div>
+        <div>
+          <label for="f_pipewire_latency">PIPEWIRE_LATENCY</label>
+          <input id="f_pipewire_latency" class="mono" placeholder="2048/192000">
+        </div>
+        <div><label for="f_latency_ms">Latency correction (ms)</label><input id="f_latency_ms" type="number" min="-2000" max="2000"></div>
+        <div><label for="f_volume">Initial volume (0.0-1.0)</label><input id="f_volume" type="number" min="0" max="1" step="0.05"></div>
+      </div>
+      <p></p>
+      <label for="f_extra">SNAP_EXTRA (extra snapclient arguments)</label>
+      <input id="f_extra" class="mono" maxlength="200" placeholder="--sampleformat 48000:24:2">
+      <p></p>
+      <div class="row"><input type="checkbox" id="f_use_alsa" style="width:auto"><label for="f_use_alsa" style="margin:0">USE_ALSA &mdash; route through the ALSA bridge instead of native PipeWire</label></div>
+      <div class="row"><input type="checkbox" id="f_autostart" style="width:auto"><label for="f_autostart" style="margin:0">Start automatically when the panel starts</label></div>
+    </div>
+    <div class="dlg-foot">
+      <button type="button" id="btnDelete" class="danger" hidden>Delete</button>
+      <span style="flex:1"></span>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary" id="btnSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgLogs">
+  <div class="dlg-head">Logs &mdash; <span id="logName"></span></div>
+  <div class="dlg-body"><pre class="logs" id="logBody"></pre></div>
+  <div class="dlg-foot"><button type="button" data-close>Close</button></div>
+</dialog>
+
+<dialog id="dlgSettings">
+  <form method="dialog" id="formSettings">
+    <div class="dlg-head">Panel settings</div>
+    <div class="dlg-body">
+      <p class="meta">Defaults for newly created players. Existing players keep their own values.</p>
+      <div class="grid">
+        <div><label for="s_host">Snapserver address</label><input id="s_host" placeholder="blank = 127.0.0.1"></div>
+        <div><label for="s_port">Stream port</label><input id="s_port" type="number" min="1" max="65535"></div>
+        <div><label for="s_control">Control port</label><input id="s_control" type="number" min="1" max="65535"></div>
+        <div><label for="s_web">Snapweb port</label><input id="s_web" type="number" min="1" max="65535"></div>
+      </div>
+    </div>
+    <div class="dlg-foot">
+      <span style="flex:1"></span>
+      <button type="button" data-close>Cancel</button>
+      <button type="submit" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  "use strict";
+
+  // Home Assistant Ingress serves this page under /api/hassio_ingress/<token>/
+  // and strips that prefix before the request reaches us, so every call has to
+  // be relative to the document. An absolute "/api/players" would leave the
+  // prefix behind and hit Home Assistant itself instead.
+  const BASE = document.baseURI.replace(/[^/]*$/, "");
+  const api = (path) => BASE + String(path).replace(/^\//, "");
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s === null || s === undefined ? "" : s).replace(
+    /[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  let config = { poll_seconds: 5, snapserver: {} };
+  let sinks = [];
+  let editing = null;
+  let timer = null;
+
+  function toast(message, bad) {
+    const el = $("toast");
+    el.textContent = message;
+    el.classList.toggle("bad", !!bad);
+    el.style.display = "block";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { el.style.display = "none"; }, bad ? 6000 : 2500);
+  }
+
+  async function call(path, options) {
+    let data = {};
+    try {
+      const res = await fetch(api(path), options);
+      try { data = await res.json(); } catch (_) { /* not JSON */ }
+      if (!res.ok && !data.error) data.error = "HTTP " + res.status;
+    } catch (err) {
+      data.error = "cannot reach the panel: " + err.message;
+    }
+    if (data.error) toast(data.error, true);
+    return data;
+  }
+
+  const postJSON = (body) => ({
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+
+  function secs(n) {
+    n = Math.floor(n || 0);
+    if (n < 60) return n + "s";
+    if (n < 3600) return Math.floor(n / 60) + "m";
+    return Math.floor(n / 3600) + "h" + Math.floor((n % 3600) / 60) + "m";
+  }
+
+  // ---- rendering ------------------------------------------------------------
+
+  function nowPlaying(p) {
+    // A stopped player shows nothing: a leftover track and live transport
+    // buttons next to a stopped player read as if it were still playing.
+    if (!p.running) return '<span class="muted">&mdash;</span>';
+    if (p.snapcast_error) return `<span class="meta">${esc(p.snapcast_error)}</span>`;
+    const s = p.snapcast;
+    if (!s) return '<span class="muted">not connected to the server</span>';
+
+    const bits = [];
+    if (s.title) {
+      bits.push(`<div class="np-title">${esc(s.title)}</div>`);
+      const sub = [s.artist, s.album].filter(Boolean).map(esc).join(" &middot; ");
+      if (sub) bits.push(`<div class="meta">${sub}</div>`);
+    } else {
+      bits.push(`<div class="meta">${esc(s.stream_id || "no stream")}` +
+        (s.playback_status ? ` &middot; ${esc(s.playback_status)}` : "") + `</div>`);
+    }
+    return `<div class="np">${bits.join("")}</div>`;
+  }
+
+  function transport(p) {
+    if (!p.running || !p.snapcast) return "";
+    const s = p.snapcast;
+    const out = [];
+    if (s.can_control) {
+      if (s.can_prev) out.push(`<button data-cmd="previous" title="Previous">&#9198;</button>`);
+      out.push(`<button data-cmd="playPause" title="Play / pause">&#9199;</button>`);
+      if (s.can_next) out.push(`<button data-cmd="next" title="Next">&#9197;</button>`);
+    }
+    if (s.volume !== null && s.volume !== undefined) {
+      out.push(`<input type="range" class="vol" min="0" max="100" value="${Number(s.volume)}" title="Volume">`);
+      out.push(`<button data-mute="${s.muted ? 1 : 0}" title="Mute">${s.muted ? "&#128263;" : "&#128266;"}</button>`);
+    }
+    return out.length ? `<div class="grp" style="margin-top:6px">${out.join("")}</div>` : "";
+  }
+
+  function snapwebLink(p) {
+    const port = (config.snapserver && config.snapserver.web_port) || 1780;
+    const host = p.server || location.hostname;
+    return `<a href="http://${esc(host)}:${port}/" target="_blank" rel="noopener">` +
+           `<button type="button" title="Open Snapweb">Snapweb</button></a>`;
+  }
+
+  function render(players) {
+    const rows = $("rows");
+    rows.replaceChildren();
+    $("playerCount").textContent = players.length ? `(${players.length})` : "";
+    $("empty").style.display = players.length ? "none" : "block";
+
+    for (const p of players) {
+      const tr = document.createElement("tr");
+      // An absent sink is the normal state for a powered-off DAC, so say so
+      // plainly rather than flagging it as an error.
+      const sink = p.node
+        ? `<span class="mono">${esc(p.node)}</span>` +
+          (p.node_present === false ? ` <span class="badge absent">absent</span>` : "")
+        : `<span class="muted">default sink</span>`;
+      const meta = p.running
+        ? `<span class="meta"> up ${secs(p.uptime)}</span>`
+        : (p.restarts ? `<span class="meta"> ${p.restarts} restarts</span>` : "");
+
+      tr.innerHTML =
+        `<td><b>${esc(p.name)}</b>` +
+          (p.client_id !== p.name ? ` <span class="badge">${esc(p.client_id)}</span>` : "") +
+          `<div class="meta">${sink}</div></td>` +
+        `<td>${nowPlaying(p)}${transport(p)}</td>` +
+        `<td><span class="state ${esc(p.state)}">${esc(p.state)}</span>${meta}` +
+          (p.detail ? `<div class="meta">${esc(p.detail)}</div>` : "") +
+          `<div class="meta">${esc(p.server)}:${Number(p.port)}</div></td>` +
+        `<td><span class="grp">` +
+          (p.running || p.state === "waiting" || p.state === "backoff"
+            ? `<button data-do="stop">Stop</button><button data-do="restart">Restart</button>`
+            : `<button data-do="start" class="primary">Start</button>`) +
+          `<button data-do="logs">Logs</button>` +
+          snapwebLink(p) +
+          `<button data-do="edit">Edit</button>` +
+        `</span></td>`;
+
+      tr.querySelectorAll("button[data-do]").forEach((b) =>
+        b.addEventListener("click", () => action(b.dataset.do, p)));
+      tr.querySelectorAll("button[data-cmd]").forEach((b) =>
+        b.addEventListener("click", () => sendControl(p, b.dataset.cmd)));
+      const slider = tr.querySelector("input[type=range]");
+      if (slider) slider.addEventListener("change", () =>
+        call(`api/players/${p.id}/volume`, postJSON({ percent: Number(slider.value) })).then(refresh));
+      const mute = tr.querySelector("button[data-mute]");
+      if (mute) mute.addEventListener("click", () =>
+        call(`api/players/${p.id}/volume`, postJSON({ muted: mute.dataset.mute !== "1" })).then(refresh));
+      rows.appendChild(tr);
+    }
+  }
+
+  function renderSinks() {
+    const rows = $("sinkRows");
+    rows.replaceChildren();
+    $("sinkCount").textContent = sinks.length ? `(${sinks.length})` : "";
+    $("sinkEmpty").style.display = sinks.length ? "none" : "block";
+    for (const s of sinks) {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        `<td>${esc(s.description)}${s.bluetooth ? ' <span class="badge">BT</span>' : ""}` +
+          `<div class="mono meta">${esc(s.node)}</div></td>` +
+        `<td style="text-align:right"><button type="button">Add player</button></td>`;
+      tr.querySelector("button").addEventListener("click", () => openPlayer(null, s));
+      rows.appendChild(tr);
+    }
+
+    const pick = $("f_node_pick");
+    pick.replaceChildren();
+    const blank = document.createElement("option");
+    blank.value = ""; blank.textContent = "-- default sink --";
+    pick.appendChild(blank);
+    for (const s of sinks) {
+      const opt = document.createElement("option");
+      opt.value = s.node;
+      opt.textContent = s.description + (s.bluetooth ? " (BT)" : "");
+      pick.appendChild(opt);
+    }
+  }
+
+  // ---- actions --------------------------------------------------------------
+
+  async function action(what, p) {
+    if (what === "edit") return openPlayer(p);
+    if (what === "logs") return showLogs(p);
+    const data = await call(`api/players/${p.id}/${what}`, postJSON());
+    if (data.players) render(data.players);
+  }
+
+  async function sendControl(p, command) {
+    const data = await call(`api/players/${p.id}/control/${command}`, postJSON());
+    if (data.players) render(data.players);
+  }
+
+  async function showLogs(p) {
+    $("logName").textContent = p.name;
+    const data = await call(`api/players/${p.id}/logs`);
+    $("logBody").textContent = (data.logs || []).join("\n") || "(no output yet)";
+    $("dlgLogs").showModal();
+    $("logBody").scrollTop = $("logBody").scrollHeight;
+  }
+
+  function openPlayer(player, sink) {
+    editing = player || null;
+    const d = player || {};
+    $("dlgTitle").textContent = player ? "Edit player" : "Add player";
+    $("btnDelete").hidden = !player;
+
+    const defaults = config.defaults || {};
+    $("f_name").value = d.name || (sink ? sink.description : "");
+    $("f_client_id").value = d.client_id && d.client_id !== d.name ? d.client_id : "";
+    $("f_node").value = d.node || (sink ? sink.node : "");
+    $("f_node_pick").value = $("f_node").value;
+    $("f_server").value = d.server || defaults.server || "";
+    $("f_port").value = d.port || defaults.port || 1704;
+    $("f_control_port").value = d.control_port || defaults.control_port || 1705;
+    $("f_pipewire_latency").value = d.pipewire_latency || "";
+    $("f_latency_ms").value = d.latency_ms || 0;
+    $("f_volume").value = d.volume === undefined ? 1 : d.volume;
+    $("f_extra").value = d.extra || "";
+    $("f_use_alsa").checked = !!d.use_alsa;
+    $("f_autostart").checked = player ? !!d.autostart : true;
+    $("dlgPlayer").showModal();
+  }
+
+  function formBody() {
+    return {
+      name: $("f_name").value,
+      client_id: $("f_client_id").value,
+      node: $("f_node").value,
+      server: $("f_server").value,
+      port: Number($("f_port").value),
+      control_port: Number($("f_control_port").value),
+      pipewire_latency: $("f_pipewire_latency").value,
+      latency_ms: Number($("f_latency_ms").value),
+      volume: Number($("f_volume").value),
+      extra: $("f_extra").value,
+      use_alsa: $("f_use_alsa").checked,
+      autostart: $("f_autostart").checked,
+    };
+  }
+
+  async function refresh() {
+    const data = await call("api/players");
+    if (data.players) render(data.players);
+  }
+
+  async function refreshSinks() {
+    const data = await call("api/sinks");
+    sinks = data.sinks || [];
+    renderSinks();
+  }
+
+  // ---- wiring ---------------------------------------------------------------
+
+  document.querySelectorAll("[data-close]").forEach((b) =>
+    b.addEventListener("click", () => b.closest("dialog").close()));
+
+  $("f_node_pick").addEventListener("change", () => { $("f_node").value = $("f_node_pick").value; });
+  $("btnRefreshSinks").addEventListener("click", refreshSinks);
+  $("btnAdd").addEventListener("click", () => openPlayer(null));
+
+  $("formPlayer").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const body = formBody();
+    const data = editing
+      ? await call(`api/players/${editing.id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body) })
+      : await call("api/players", postJSON(body));
+    if (data.error) return;           // dialog stays open so the input can be fixed
+    $("dlgPlayer").close();
+    toast(editing ? "Player updated" : "Player created");
+    if (data.players) render(data.players);
+  });
+
+  $("btnDelete").addEventListener("click", async () => {
+    if (!editing || !confirm(`Delete player "${editing.name}"?`)) return;
+    const data = await call(`api/players/${editing.id}`, { method: "DELETE" });
+    if (data.error) return;
+    $("dlgPlayer").close();
+    toast("Player deleted");
+    if (data.players) render(data.players);
+  });
+
+  $("btnSettings").addEventListener("click", async () => {
+    const data = await call("api/settings");
+    const s = data.settings || {};
+    $("s_host").value = s.snapserver_host || "";
+    $("s_port").value = s.snapserver_port || 1704;
+    $("s_control").value = s.snapserver_control_port || 1705;
+    $("s_web").value = s.snapserver_web_port || 1780;
+    $("dlgSettings").showModal();
+  });
+
+  $("formSettings").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const data = await call("api/settings", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        snapserver_host: $("s_host").value,
+        snapserver_port: Number($("s_port").value),
+        snapserver_control_port: Number($("s_control").value),
+        snapserver_web_port: Number($("s_web").value),
+      }),
+    });
+    if (data.error) return;
+    $("dlgSettings").close();
+    toast("Settings saved");
+    await boot(false);
+  });
+
+  async function boot(full) {
+    const data = await call("api/config");
+    if (!data.error) config = data;
+    const s = config.snapserver || {};
+    $("serverChip").textContent = "snapserver " + (s.host || "127.0.0.1") + ":" + (s.port || 1704);
+    if (full) {
+      await refreshSinks();
+      clearInterval(timer);
+      timer = setInterval(() => { refresh(); }, (config.poll_seconds || 5) * 1000);
+      // Sinks change far less often than player state.
+      setInterval(refreshSinks, Math.max(15, (config.poll_seconds || 5) * 4) * 1000);
+    }
+    await refresh();
+  }
+
+  boot(true);
+})();
+</script>
+</body>
+</html>

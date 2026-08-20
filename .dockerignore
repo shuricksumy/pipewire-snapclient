@@ -1,13 +1,15 @@
-# Keep the build context to what the Dockerfile actually copies: entrypoint.sh
-# and snapserver.conf. The Snapcast .deb packages are fetched from the upstream
-# GitHub release in stage 0, and utils/ alone is ~10 MB of tarballs that were
-# being uploaded to the builder on every build.
+# Keep the build context to what the Dockerfile actually copies: entrypoint.sh,
+# snapserver.conf and panel/. The Snapcast .deb packages are fetched from the
+# upstream GitHub release in stage 0, and utils/ alone is ~10 MB of tarballs
+# that were being uploaded to the builder on every build.
 .git
 .github
 utils
+tests
 *.md
 LICENSE
 docker-compose*.yml
 docker-compose*.yaml
 JBL-fix.sh
 ubuntu-pipewire-install-on-host.sh
+**/__pycache__

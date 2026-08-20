@@ -70,6 +70,8 @@ LABEL org.opencontainers.image.title="snapcast-pipewire" \
 #   wireplumber   the session manager wpctl talks to
 #   pipewire-alsa + libasound2-plugins + alsa-utils   the USE_ALSA=true bridge path
 #   python3       snapserver's /usr/share/snapserver/plug-ins/meta_*.py stream helpers
+#   python3-flask ROLE=panel's HTTP layer. Distro package, not pip: no wheels to
+#                 audit and it gets Debian's security updates with everything else
 #   procps        pgrep, used by the HEALTHCHECK below
 # avahi-daemon and dbus-daemon were dropped: nothing ever started them (the
 # entrypoint execs snapcast directly), so they were dead weight and CVE surface.
@@ -87,6 +89,7 @@ RUN echo "cache epoch: ${REFRESH_WEEK}" && apt-get update && apt-get upgrade -y 
     pipewire-alsa \
     wireplumber \
     python3 \
+    python3-flask \
     procps \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
@@ -131,11 +134,15 @@ RUN set -eu; \
 # 24-bit sample format and web UI settings in it were silently ignored.
 COPY snapserver.conf /etc/snapserver.conf
 
-# 6. Entrypoint
+# 6. The web panel (ROLE=panel). Inert for the other roles: nothing imports it
+# and Flask is only loaded when app.py runs.
+COPY panel/ /app/
+
+# 7. Entrypoint
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-# 7. Run unprivileged.
+# 8. Run unprivileged.
 # UID/GID 1000 is the default because the host socket that gets mounted in
 # (/run/user/1000/pipewire-0) is normally owned by the desktop user; if yours
 # differs, override with `user: "<uid>:<gid>"` in compose. The audio group is for
@@ -160,7 +167,13 @@ ENV ROLE="snapclient" \
     PIPEWIRE_LATENCY="2048/192000" \
     EXTRA_ARGS="" \
     SNAP_EXTRA="" \
-    HOME="/home/snapcast"
+    HOME="/home/snapcast" \
+    CONFIG_DIR="/config" \
+    PORT="8080" \
+    BIND_HOST="0.0.0.0" \
+    ADMIN_USER="admin" \
+    ADMIN_PASSWORD="" \
+    PYTHONUNBUFFERED="1"
 
 # Named, not numeric: Docker only applies supplementary groups (i.e. the audio
 # group added above, needed for the /dev/snd passthrough in USE_ALSA mode) when
@@ -171,9 +184,12 @@ USER snapcast
 
 # Report unhealthy once the snapcast process for this role is gone -- the client
 # entrypoint keeps the container alive across reconnects, so a container that is
-# up is not by itself evidence that anything is playing.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD pgrep -x "${ROLE}" > /dev/null || exit 1
+# up is not by itself evidence that anything is playing. ROLE=panel has no such
+# process (it supervises its own children), so it is checked over HTTP instead,
+# where any answer -- 401 included -- means the panel is alive.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD if [ "$ROLE" = "panel" ]; then python3 /app/healthcheck.py; \
+      else pgrep -x "$ROLE" > /dev/null; fi || exit 1
 
 # Confirm the unprivileged user can actually execute the binaries
 RUN snapclient --version > /dev/null && snapserver --version > /dev/null

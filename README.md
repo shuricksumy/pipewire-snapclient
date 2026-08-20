@@ -74,7 +74,7 @@ setup — e.g. LedFx or another producer also writes into the same FIFOs. Three 
 | **Stream name** | MA requires a stream named `default`. [`snapserver.conf`](snapserver.conf) here ships `Default` — rename it if you go this route. |
 
 ## Features
-- Dual Role Strategy: Use a single image for both snapserver and snapclient.
+- Three Roles, One Image: `snapclient`, `snapserver`, or a **web panel** that creates and supervises players for you &mdash; see [🎛️ Web panel](#-web-panel-rolepanel).
 
 - Native PipeWire: Built against the with-pipewire Debian package for ultra-low latency and bit-perfect sample rate switching.
 
@@ -270,7 +270,8 @@ pw-cli ls Node | grep -E 'node.name|node.description'
 ##  🚀 Deployment (Docker Compose)
 
 Ready-to-edit files live in the repo: [`docker-compose-example.yaml`](docker-compose-example.yaml) (client),
-[`docker-compose-server-example.yaml`](docker-compose-server-example.yaml) (server) and
+[`docker-compose-server-example.yaml`](docker-compose-server-example.yaml) (server),
+[`docker-compose-panel-example.yaml`](docker-compose-panel-example.yaml) (web panel) and
 [`docker-compose.yml`](docker-compose.yml) (local build).
 
 ### Server Role (The Engine)
@@ -326,6 +327,45 @@ services:
     restart: unless-stopped
 ```
 
+## 🎛️ Web panel (ROLE=panel)
+
+One container, a browser, and as many players as you have outputs &mdash; no compose
+edit and no SSH session to change a parameter. The panel lists the sinks PipeWire
+is offering, and each player you create is a supervised `snapclient` child
+process with its own `PIPEWIRE_NODE`, so several DACs run side by side out of a
+single container.
+
+Every field is what the `ROLE=snapclient` role would take from the environment
+(`SERVER_IP`, `SNAP_PORT`, `CLIENT_ID`, `USE_ALSA`, `PIPEWIRE_NODE`,
+`PIPEWIRE_LATENCY`, `SNAP_EXTRA`), editable per player at runtime. Players are
+stored in `/config/players.json` and restored on restart.
+
+```bash
+mkdir -p panel_config && sudo chown -R 1000:1000 panel_config
+docker compose -f docker-compose-panel-example.yaml up -d
+# then browse http://<host>:8080/
+```
+
+It also reads the snapserver's control port, so each row shows what is playing
+and offers transport and volume controls &mdash; the same ones Snapweb and Music
+Assistant drive, acting on the stream the player's group is attached to.
+
+**Real-time scheduling is container-level.** Players are children of the panel
+process, so they inherit *its* limits: the panel needs the same
+`cap_add: SYS_NICE` and `rtprio`/`memlock` ulimits a standalone client would, or
+every player runs at normal priority and audio glitches under load. The
+[example compose file](docker-compose-panel-example.yaml) sets them.
+
+**Two things it does not do.** Restarting the container stops every player &mdash;
+one container per player survives a panel restart, this does not. And it manages
+*clients*, not the server: groups, streams and server-wide settings still belong
+to Snapweb or Music Assistant, which each row links to.
+
+> **Security:** with `ADMIN_PASSWORD` unset there is no authentication at all &mdash;
+> intended for a trusted LAN. Set `ADMIN_PASSWORD` (and optionally `ADMIN_USER`)
+> to put HTTP Basic auth in front of every route, the page included, before
+> exposing the port anywhere else. Do not port-forward this.
+
 ## 🔒 Running unprivileged
 
 The image runs as **uid/gid 1000** (group `audio`), not root. 1000 is the uid that normally owns
@@ -342,7 +382,7 @@ The image runs as **uid/gid 1000** (group `audio`), not root. 1000 is the uid th
 
 | Variable | Default | Description |
 | :-- | :-- | :-- |
-|ROLE|snapclient|Set to ```snapserver``` or ```snapclient```|
+|ROLE|snapclient|```snapclient```, ```snapserver``` or ```panel``` (the web UI).|
 |SNAP_PORT|1704|The TCP streaming port. Ignored if `SERVER_IP` already carries a port.|
 |SERVER_IP|127.0.0.1|(Client only) Snapserver address. Accepts `host`, `host:port` or `tcp://host:port`.|
 |CLIENT_ID|Snap-Node|(Client only) Name appearing in the Web UI (`--hostID`).|
@@ -354,6 +394,23 @@ The image runs as **uid/gid 1000** (group `audio`), not root. 1000 is the uid th
 |SNAP_EXTRA|_(empty)_|(Client only) Extra arguments appended to the `snapclient` command line.|
 |EXTRA_ARGS|_(empty)_|(Server only) Extra arguments appended to the `snapserver` command line.|
 |DEBUG|false|`true` enables `set -x` tracing in the entrypoint.|
+
+### Panel role only
+
+| Variable | Default | Description |
+| :-- | :-- | :-- |
+|PORT|8080|Port the panel listens on.|
+|ADMIN_PASSWORD|_(empty)_|Set it to require HTTP Basic auth on every route. Empty = no authentication.|
+|ADMIN_USER|admin|Username for the above.|
+|SNAP_CONTROL_PORT|1705|Snapserver's JSON-RPC port &mdash; now playing, transport, volume. A separate listener from the stream port, so it is not derived from `SNAP_PORT`.|
+|SNAP_WEB_PORT|1780|Snapweb's port, used for the per-player link.|
+|CONFIG_DIR|/config|Where `players.json` is written. Must be writable by uid 1000.|
+|POLL_SECONDS|5|How often the browser re-reads the player table.|
+|BIND_HOST|0.0.0.0|Address the panel binds to.|
+
+`SERVER_IP`, `SNAP_PORT`, `PIPEWIRE_LATENCY` and the ports above only *seed* the
+Add-player form: each player stores its own copy, and the panel's Settings
+dialog can change the defaults without touching compose.
 
 ## 🏗️ Build Requirements
 
@@ -372,6 +429,19 @@ fine and then reject `--player pipewire` only at runtime.
 |SNAPCAST_VERSION|latest|Release tag to install, e.g. `v0.35.0`. `latest` resolves the newest published release at build time; CI pins the tag it resolved so the layer caches.|
 |SNAPCAST_SUITE|trixie|Debian suite variant of the release asset (`trixie`, `bookworm`, `bullseye`).|
 |REFRESH_WEEK|0|Cache epoch. CI sets it to the ISO week so the weekly scheduled rebuild really re-runs `apt-get upgrade` instead of restoring a stale layer.|
+
+### Tests
+
+The panel's supervisor and API are covered by a pytest suite that needs **no
+PipeWire, no DAC, no snapserver and no root** &mdash; `snapclient` is replaced by
+[`tests/fake_snapclient.py`](tests/fake_snapclient.py) and the control port by
+[`tests/fake_snapserver.py`](tests/fake_snapserver.py), so it runs anywhere and
+gates every build in CI:
+
+```Bash
+pip install flask pytest
+python -m pytest tests/ -q
+```
 
 Build Command:
 

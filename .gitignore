@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# Created by the compose examples for the snapserver and panel roles
+panel_config/
+snapserver_config/

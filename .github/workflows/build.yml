@@ -35,7 +35,27 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # The panel's supervisor and API, against a fake snapclient and a fake
+  # snapserver -- no PipeWire, no DAC, no root, so it runs on a plain runner.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Install test dependencies
+        run: pip install flask pytest
+
+      - name: Run the panel test suite
+        run: python -m pytest tests/ -q
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
