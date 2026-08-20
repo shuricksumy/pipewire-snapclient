@@ -6,6 +6,18 @@
 
 A high-performance, multi-architecture (amd64, arm64) Docker container running Snapcast with native PipeWire support. Optimized for bit-perfect audio delivery to high-end DACs like the Topping DX5.
 
+## ✨ What you get
+
+|  | |
+| :-- | :-- |
+| 🏠 **Every room in sync** | Press play once; the kitchen and the living room stay together. Walk between them and the song follows without an echo. |
+| 🎯 **Nothing is resampled** | A 44.1 kHz track reaches the DAC as 44.1 kHz. The volume lands on the real hardware, not a software fader. |
+| ♻️ **Add a room in one container** | Any Linux box with an audio output becomes a speaker. Old laptop, mini-PC, Raspberry Pi. |
+| 🔁 **It reconnects itself** | The client waits out a server restart with a backoff instead of dying. |
+| 🔒 **Runs unprivileged** | uid 1000, no root, no privileged mode. |
+
+**Running more than one room?** The [Home Audio Stack](https://github.com/shuricksumy/home-audio-stack) has a [complete compose file](https://github.com/shuricksumy/home-audio-stack/tree/main/examples) with this image alongside the others.
+
 ## 🎯 Why this exists
 
 [**Music Assistant**](https://www.music-assistant.io/) is the library and streaming brain — Spotify, Plex, local files, radio — and Home Assistant drives it. What it cannot do on its own is put audio into a **USB DAC plugged into some other Linux box**, at the original sample rate, in sync with the rest of the house.
