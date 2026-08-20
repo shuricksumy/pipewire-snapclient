@@ -1,5 +1,7 @@
 # Snapcast-PipeWire
 
+> **Part of the [Home Audio Stack](https://github.com/shuricksumy/home-audio-stack)** — Music Assistant → Snapcast → PipeWire, into USB DACs, Bluetooth speakers and LED strips. That page maps how these projects fit together.
+
 [![Build_Push_Scan](https://github.com/shuricksumy/pipewire-snapclient/actions/workflows/build.yml/badge.svg)](https://github.com/shuricksumy/pipewire-snapclient/actions/workflows/build.yml)
 
 A high-performance, multi-architecture (amd64, arm64) Docker container running Snapcast with native PipeWire support. Optimized for bit-perfect audio delivery to high-end DACs like the Topping DX5.
