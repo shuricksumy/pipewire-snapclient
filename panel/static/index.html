@@ -77,29 +77,38 @@
   .spacer { flex: 1; }
   .summary { color: var(--muted); font-size: .85rem; }
 
-  /* Fixed layout with explicit widths: without it a long node name takes as
-     much room as it likes and squeezes the actions column into a stack. */
+  /* Four wide columns, auto width. Seven narrow ones left every value
+     truncated to nothing; the output, uptime and server all read better folded
+     into the column they belong to. */
   .wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1060px; }
-  th, td { text-align: left; padding: .6rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  th { vertical-align: bottom; }
-  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  table { width: 100%; border-collapse: collapse; min-width: 860px; }
+  th, td { text-align: left; padding: .7rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); vertical-align: bottom; }
   tr:last-child td { border-bottom: 0; }
-  col.c-name    { width: 14%; }
-  col.c-output  { width: 16%; }
-  col.c-np      { width: 21%; }
-  col.c-server  { width: 12%; }
-  col.c-state   { width: 11%; }
-  col.c-uptime  { width: 7%; }
-  /* Wide enough for four buttons: with table-layout:fixed a cell that is too
-     narrow does not grow, it just overflows and paints over its neighbour. */
-  col.c-actions { width: 19%; }
   .nowrap { white-space: nowrap; }
+  .toolbar { display: flex; align-items: center; gap: .5rem; margin-bottom: .8rem; }
+  .count { color: var(--muted); font-weight: 400; }
+  .hint { color: var(--muted); font-size: .85rem; margin: .8rem 0 0; }
+  .hint code { font-size: .8rem; }
   /* min-width:0 is what lets the ellipsis kick in inside a flex or table cell. */
   .truncate {
     display: block; min-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
+
+  /* The node name under a player. display:block matters: max-width and overflow
+     do nothing on an inline element, so as a <span> it wrapped onto three lines
+     instead of truncating. */
+  .sink {
+    display: block; min-width: 0; max-width: 26rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+    color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sink-row { display: flex; align-items: center; gap: .35rem; min-width: 0; margin-top: .15rem; }
+  .sink-row .badge { flex: 0 0 auto; }
+  .state-cell { white-space: nowrap; }
+  .state-meta { font-size: .74rem; color: var(--muted); white-space: nowrap; }
 
   button {
     font: inherit; padding: .3rem .55rem; border-radius: 7px; cursor: pointer;
@@ -109,8 +118,7 @@
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { color: var(--bad); }
   button:disabled { opacity: .45; cursor: not-allowed; }
-  button.small { padding: .2rem .45rem; font-size: .82rem; }
-  .actions { display: flex; gap: .25rem; justify-content: flex-end; white-space: nowrap; }
+  .actions { display: flex; gap: .3rem; justify-content: flex-end; white-space: nowrap; }
 
   input, select {
     font: inherit; padding: .35rem .5rem; border-radius: 7px; width: 100%;
@@ -197,34 +205,35 @@
   <span class="summary" id="summary"></span>
   <span class="spacer"></span>
   <span class="badge" id="serverChip"></span>
-  <a id="snapweb" href="#" target="_blank" rel="noopener"><button type="button">Snapweb</button></a>
   <button id="themeToggle" title="theme">🌗</button>
-  <button id="btnSettings">Settings</button>
-  <button id="btnAdd" class="primary">Add player</button>
 </header>
 
 <main>
   <div id="warnings"></div>
+
+  <div class="toolbar">
+    <a id="snapweb" href="#" target="_blank" rel="noopener">
+      <button type="button" title="open Snapweb on the snapserver">Snapweb</button>
+    </a>
+    <button id="btnSettings" title="settings">⚙</button>
+    <span class="spacer"></span>
+    <button id="btnAdd" class="primary">Add player</button>
+  </div>
+
+  <h2>Snapcast players <span class="count" id="playerCount"></span></h2>
   <div class="card">
-    <h2>Players</h2>
     <div class="wrap">
       <table>
-        <colgroup>
-          <col class="c-name"><col class="c-output"><col class="c-np"><col class="c-server">
-          <col class="c-state"><col class="c-uptime"><col class="c-actions">
-        </colgroup>
-        <thead>
-          <tr>
-            <th>Name</th><th>Output</th><th>Now playing</th><th>Server</th>
-            <th>State</th><th class="nowrap">Uptime</th>
-            <th style="text-align:right">Actions</th>
-          </tr>
-        </thead>
+        <thead><tr><th>Player</th><th>Now playing</th><th>State</th><th></th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
     <div class="empty" id="empty">No players yet. <b>Add player</b> creates one and starts it.</div>
   </div>
+  <p class="hint">
+    Each player is a supervised <code>snapclient</code> inside this container, bound to one
+    PipeWire sink or ALSA device. Restarting this container stops every player.
+  </p>
 </main>
 
 <dialog id="dlgPlayer">
@@ -505,6 +514,7 @@
     rows.replaceChildren();
     $("empty").hidden = players.length > 0;
     const running = players.filter((p) => p.running).length;
+    $("playerCount").textContent = players.length ? `(${players.length})` : "";
     $("summary").textContent = players.length
       ? `${running} of ${players.length} running` : "";
 
@@ -518,26 +528,25 @@
       const alsa = p.output_mode === "alsa" ? ` <span class="badge alsa">ALSA</span>` : "";
 
       tr.innerHTML =
-        `<td><b class="truncate" title="${esc(p.name)}">${esc(p.name)}</b>` +
-          (p.client_id !== p.name
-            ? `<span class="meta truncate" title="${esc(p.client_id)}">${esc(p.client_id)}</span>` : "") +
-          `</td>` +
-        `<td><span class="mono truncate" title="${esc(out)}">${esc(out)}</span>${alsa}${absent}</td>` +
+        `<td><b>${esc(p.name)}</b>` +
+          (p.output_mode === "alsa" ? ` <span class="badge alsa">ALSA</span>` : "") +
+          (p.client_id !== p.name ? ` <span class="badge">${esc(p.client_id)}</span>` : "") +
+          `<div class="sink-row"><span class="sink" title="${esc(out)}">${esc(out)}</span>` +
+          (p.node_present === false ? `<span class="badge absent">absent</span>` : "") +
+          `</div></td>` +
         `<td>${nowPlaying(p)}</td>` +
-        `<td class="meta"><span class="truncate" title="${esc(p.server)}:${Number(p.port)}">` +
-          `${esc(p.server)}:${Number(p.port)}</span></td>` +
-        `<td><span class="state ${esc(p.state)}">${esc(p.state)}</span>` +
-          (p.detail ? `<div class="meta truncate" title="${esc(p.detail)}">${esc(p.detail)}</div>` : "") +
-          (p.restarts ? `<div class="meta">${Number(p.restarts)} restarts</div>` : "") +
-          `</td>` +
-        `<td class="meta nowrap">${uptime(p.uptime)}</td>` +
+        `<td class="state-cell"><span class="state ${esc(p.state)}">${esc(p.state)}</span>` +
+          (p.running ? `<span class="state-meta"> ${uptime(p.uptime)}</span>` : "") +
+          (p.detail ? `<div class="state-meta">${esc(p.detail)}</div>` : "") +
+          (p.restarts ? `<div class="state-meta">${Number(p.restarts)} restarts</div>` : "") +
+          `<div class="state-meta">${esc(p.server)}:${Number(p.port)}</div></td>` +
         `<td><div class="actions">` +
           (p.running || p.state === "waiting" || p.state === "backoff"
-            ? `<button class="small" data-do="stop">Stop</button>`
-            : `<button class="small primary" data-do="start">Start</button>`) +
-          `<button class="small" data-do="restart">Restart</button>` +
-          `<button class="small" data-do="logs">Log</button>` +
-          `<button class="small" data-do="edit">Edit</button>` +
+            ? `<button data-do="stop">Stop</button>`
+            : `<button data-do="start" class="primary">Start</button>`) +
+          `<button data-do="restart">Restart</button>` +
+          `<button data-do="logs">Logs</button>` +
+          `<button data-do="edit">Edit</button>` +
         `</div></td>`;
 
       tr.querySelectorAll("button[data-do]").forEach((b) =>
