@@ -26,10 +26,18 @@ services:
       # players.json lives here. Must be writable by uid 1000:
       #     mkdir -p panel_config && sudo chown -R 1000:1000 panel_config
       - ./panel_config:/config
-      # Optional: direct ALSA access as a fallback
-      #- /dev/snd:/dev/snd
+
+    # For the ALSA output mode -- a player addressing the card directly instead
+    # of going through PipeWire. It has to be `devices:`, not a volume: mounting
+    # /dev/snd as a volume maps the nodes but the device cgroup still refuses to
+    # open them, so snapclient reports "No such device" and the panel's device
+    # list comes back with conversion plugins only. Drop this block if every
+    # player uses the PipeWire output.
+    devices:
+      - /dev/snd:/dev/snd
 
     environment:
+      # panel is the image default; stated here so the file reads unambiguously.
       - ROLE=panel
       - PORT=8080                   # the panel listens here; browse http://<host>:8080/
       # Seeds the Add-player form. Every player can override them, and the

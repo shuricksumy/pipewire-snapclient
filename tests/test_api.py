@@ -80,7 +80,7 @@ def create(client, **over):
 def test_index_is_served(client):
     res = client.get("/")
     assert res.status_code == 200
-    assert b"Snapcast Player Panel" in res.data
+    assert b"Snapcast Players" in res.data
 
 
 def test_the_ui_calls_the_api_relative_to_the_document():
@@ -157,11 +157,13 @@ def test_a_duplicate_name_is_rejected(client):
 def test_updating_a_player(client):
     player = create(client).get_json()["player"]
     res = client.patch("/api/players/%s" % player["id"],
-                       json={"server": "10.0.0.9", "use_alsa": True})
+                       json={"server": "10.0.0.9", "output_mode": "alsa",
+                             "alsa_device": "hw:CARD=DX5,DEV=0"})
     assert res.status_code == 200
     updated = res.get_json()["player"]
     assert updated["server"] == "10.0.0.9"
-    assert updated["use_alsa"] is True
+    assert updated["output_mode"] == "alsa"
+    assert updated["alsa_device"] == "hw:CARD=DX5,DEV=0"
 
 
 def test_actions_on_an_unknown_player_are_404(client):
@@ -441,3 +443,40 @@ def test_stale_clients_exclude_live_players(client, snapserver):
     assert "Ghost" not in snapserver.clients
     # A live player's client must not be deletable through that route.
     assert client.delete("/api/snapcast/client/DX5").status_code == 409
+
+
+# ---- outputs and warnings ---------------------------------------------------
+
+
+def test_outputs_list_both_pipewire_and_alsa(client, monkeypatch):
+    monkeypatch.setenv("FAKE_ALSA_MODE", "hardware")
+    body = client.get("/api/sinks").get_json()
+    assert body["sinks"][0]["node"] == "alsa_output.usb-Topping_DX5-00.analog-stereo"
+    assert any(d["device"] == "hw:CARD=DX5,DEV=0" for d in body["alsa"])
+    # config carries the same lists, so the page can draw the picker on first load
+    config = client.get("/api/config").get_json()
+    assert config["sinks"] and config["alsa"]
+
+
+def test_a_plugins_only_listing_warns_about_dev_snd(client, monkeypatch, app_module):
+    """-v /dev/snd mounts the nodes but the device cgroup still blocks opening
+    them, so enumeration returns only conversion plugins."""
+    monkeypatch.setenv("FAKE_ALSA_MODE", "plugins")
+    app_module.players_mod._alsa_cache["at"] = 0.0
+    warnings = client.get("/api/config").get_json()["warnings"]
+    assert any("devices: [/dev/snd:/dev/snd]" in w for w in warnings), warnings
+
+
+def test_creating_an_alsa_player(client):
+    res = create(client, name="Direct", output_mode="alsa",
+                 alsa_device="hw:CARD=DX5,DEV=0", node="")
+    assert res.status_code == 201
+    player = res.get_json()["player"]
+    assert player["output_mode"] == "alsa"
+    assert player["alsa_device"] == "hw:CARD=DX5,DEV=0"
+
+
+def test_an_alsa_player_rejects_a_bad_device(client):
+    res = create(client, output_mode="alsa", alsa_device="not a device", node="")
+    assert res.status_code == 400
+    assert "alsa" in res.get_json()["error"].lower()

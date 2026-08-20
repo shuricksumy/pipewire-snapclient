@@ -10,7 +10,9 @@ set -uo pipefail
 
 log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$1] ➡️ $2"; }
 
-ROLE="${ROLE:-snapclient}"
+# The panel is the default: with no ROLE set you get the web UI, which can
+# then create players. A bare snapclient still needs ROLE=snapclient.
+ROLE="${ROLE:-panel}"
 SNAP_PORT="${SNAP_PORT:-1704}"
 USE_ALSA="${USE_ALSA:-false}"
 PLAYER_NAME="${PLAYER_NAME:-}"

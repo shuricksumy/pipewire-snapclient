@@ -3,10 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Snapcast Player Panel</title>
+<title>Snapcast Players</title>
 <style>
+  /* Light is the base. Dark applies when the system asks for it *and* the user
+     has not forced light, or when the user has explicitly chosen dark -- so the
+     switcher wins in both directions and "system" needs no attribute. */
   :root {
-    color-scheme: light dark;
+    color-scheme: light;
     --bg: #f6f7f9;
     --card: #ffffff;
     --ink: #16181d;
@@ -22,7 +25,8 @@
     --badbg: #fdeceb;
   }
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
       --bg: #14161a;
       --card: #1c1f25;
       --ink: #e8eaed;
@@ -38,152 +42,188 @@
       --badbg: #3a1d1b;
     }
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #14161a;
+    --card: #1c1f25;
+    --ink: #e8eaed;
+    --muted: #9aa3ae;
+    --line: #2c313a;
+    --accent: #6f9dff;
+    --ok: #5bd08a;
+    --warn: #e0b341;
+    --bad: #ff7a70;
+    --chip: #262b33;
+    --okbg: #17301f;
+    --warnbg: #33290f;
+    --badbg: #3a1d1b;
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--ink);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
   header {
-    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-    padding: 16px 20px; border-bottom: 1px solid var(--line); background: var(--card);
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--line); background: var(--card);
   }
-  h1 { font-size: 18px; margin: 0; flex: 1; }
-  h2 { font-size: 15px; margin: 0 0 10px; }
-  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 1.15rem; margin: 0; }
+  h2 { font-size: .95rem; margin: 0 0 .7rem; }
+  main { max-width: 1200px; margin: 0 auto; padding: 1.25rem; }
   .card {
     background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; padding: 16px; margin-bottom: 16px;
+    border-radius: 10px; padding: 1rem; margin-bottom: 1rem;
   }
-  table { width: 100%; border-collapse: collapse; }
-  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  /* The player name is the one thing allowed to wrap; everything else is
-     capped so the fixed-width actions column is never clipped. */
-  td:first-child { max-width: 20rem; }
-  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-  tr:last-child td { border-bottom: 0; }
+  .spacer { flex: 1; }
+  .summary { color: var(--muted); font-size: .85rem; }
+
+  /* Fixed layout with explicit widths: without it a long node name takes as
+     much room as it likes and squeezes the actions column into a stack. */
   .wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 1060px; }
+  th, td { text-align: left; padding: .6rem .5rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { vertical-align: bottom; }
+  th { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  col.c-name    { width: 14%; }
+  col.c-output  { width: 16%; }
+  col.c-np      { width: 21%; }
+  col.c-server  { width: 12%; }
+  col.c-state   { width: 11%; }
+  col.c-uptime  { width: 7%; }
+  /* Wide enough for four buttons: with table-layout:fixed a cell that is too
+     narrow does not grow, it just overflows and paints over its neighbour. */
+  col.c-actions { width: 19%; }
+  .nowrap { white-space: nowrap; }
+  /* min-width:0 is what lets the ellipsis kick in inside a flex or table cell. */
+  .truncate {
+    display: block; min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+
   button {
-    font: inherit; padding: 5px 10px; border-radius: 7px; cursor: pointer;
+    font: inherit; padding: .3rem .55rem; border-radius: 7px; cursor: pointer;
     border: 1px solid var(--line); background: var(--chip); color: var(--ink);
   }
-  button:hover { border-color: var(--accent); }
+  button:hover:not(:disabled) { border-color: var(--accent); }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.danger { color: var(--bad); }
   button:disabled { opacity: .45; cursor: not-allowed; }
-  .grp { display: flex; gap: 6px; flex-wrap: wrap; }
+  button.small { padding: .2rem .45rem; font-size: .82rem; }
+  .actions { display: flex; gap: .25rem; justify-content: flex-end; white-space: nowrap; }
+
   input, select {
-    font: inherit; padding: 6px 8px; border-radius: 7px; width: 100%;
+    font: inherit; padding: .35rem .5rem; border-radius: 7px; width: 100%;
     border: 1px solid var(--line); background: var(--bg); color: var(--ink);
   }
-  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
-  .row { display: flex; align-items: center; gap: 8px; }
+  label { display: block; font-size: .72rem; color: var(--muted); margin-bottom: .2rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .8rem; }
+  .checkline { display: flex; align-items: center; gap: .5rem; margin-top: .7rem; }
+  .checkline input { width: auto; }
+  .checkline label { margin: 0; font-size: .85rem; color: var(--ink); }
+
   .muted { color: var(--muted); }
-  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-  .meta { font-size: 12px; color: var(--muted); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .78rem; }
+  .meta { font-size: .74rem; color: var(--muted); }
   .badge {
-    font-size: 11px; padding: 1px 6px; border-radius: 999px;
+    font-size: .68rem; padding: .05rem .4rem; border-radius: 999px;
     background: var(--chip); color: var(--muted); border: 1px solid var(--line);
   }
   .badge.absent { color: var(--bad); }
-  dialog {
-    border: 1px solid var(--line); border-radius: 12px; padding: 0;
-    background: var(--card); color: var(--ink); width: min(680px, 94vw);
-  }
-  dialog::backdrop { background: rgba(0,0,0,.45); }
-  .dlg-head, .dlg-foot {
-    padding: 14px 16px; display: flex; gap: 8px; align-items: center;
-  }
-  .dlg-head { border-bottom: 1px solid var(--line); font-weight: 600; }
-  .dlg-foot { border-top: 1px solid var(--line); justify-content: flex-end; }
-  .dlg-body { padding: 16px; max-height: 70vh; overflow: auto; }
-  pre.logs {
-    margin: 0; padding: 12px; background: var(--bg); border-radius: 8px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-    white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto;
-  }
-  #toast {
-    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
-    background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent);
-    border-radius: 8px; padding: 10px 14px; box-shadow: 0 6px 24px rgba(0,0,0,.18);
-    max-width: 90vw; display: none;
-  }
-  #toast.bad { border-left-color: var(--bad); }
-  .empty { color: var(--muted); padding: 12px 4px; }
-
-  /* The node name is long enough to wrap a cell onto three lines and shove the
-     other columns around, so it is truncated with the full value in title=. */
-  .sink {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
-    color: var(--muted); max-width: 16rem;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .state-cell, .actions-cell { white-space: nowrap; }
-  /* One row of buttons, not two: the actions column is the last thing that
-     should reflow when a track title gets longer. */
-  .actions-cell .grp { flex-wrap: nowrap; justify-content: flex-end; }
-  .actions-cell button { padding: 5px 8px; }
-  /* The node name truncates; the badge next to it must not be squeezed away. */
-  .sink-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .sink-row .badge { flex: 0 0 auto; }
-  .state {
-    font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
-    background: var(--chip);
-  }
+  .badge.alsa { color: var(--accent); }
+  .state { font-size: .72rem; font-weight: 600; padding: .1rem .45rem; border-radius: 999px; }
   .state.running { background: var(--okbg); color: var(--ok); }
   .state.stopped { background: var(--line); color: var(--muted); }
   .state.waiting, .state.backoff, .state.starting { background: var(--warnbg); color: var(--warn); }
   .state.failed { background: var(--badbg); color: var(--bad); }
+  .warn {
+    background: var(--warnbg); color: var(--warn); border-radius: 8px;
+    padding: .55rem .75rem; margin-bottom: .6rem; font-size: .85rem;
+  }
 
   /* Now playing: art, text and transport on one line; volume on its own below.
      Without the nowrap on .transport the mute button drops to a second row as
      soon as the track title is long. */
-  .np { display: flex; align-items: center; gap: 9px; }
+  .np { display: flex; align-items: center; gap: .5rem; }
   .np img {
-    width: 38px; height: 38px; border-radius: 5px; object-fit: cover;
+    width: 30px; height: 30px; border-radius: 5px; object-fit: cover;
     flex: 0 0 auto; background: var(--line);
   }
-  /* min-width:0 is what lets the ellipsis actually kick in inside a flex row. */
-  .np-text { min-width: 0; flex: 1 1 auto; max-width: 14rem; }
-  .np-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .np-artist { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .transport { display: flex; gap: 3px; flex: 0 0 auto; white-space: nowrap; }
-  .transport button { padding: 4px 7px; font-size: 14px; line-height: 1; }
-  .vol { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
-  .vol button { padding: 3px 6px; line-height: 1; }
-  .vol input[type=range] { width: 7.5rem; accent-color: var(--accent); }
-  .vol span { font-size: 12px; color: var(--muted); min-width: 2.6rem; }
+  .np-text { min-width: 0; flex: 1 1 auto; }
+  .np-title { font-size: .82rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .np-artist { font-size: .74rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* One tidy strip: skip/volume together on a single line under the text.
+     Previously the transport was pushed to the far right of the cell by the
+     elastic text block and the volume took a line of its own, which left every
+     row a different height. */
+  .np-controls { display: flex; align-items: center; gap: .5rem; margin-top: .35rem; }
+  .transport { display: flex; gap: .15rem; flex: 0 0 auto; white-space: nowrap; }
+  .transport button { padding: .15rem .3rem; font-size: .8rem; line-height: 1; }
+  .vol { display: flex; align-items: center; gap: .3rem; flex: 0 0 auto; }
+  .vol button { padding: .1rem .3rem; line-height: 1; font-size: .8rem; }
+  .vol input[type=range] { width: 5rem; accent-color: var(--accent); }
+  .vol span { font-size: .7rem; color: var(--muted); min-width: 2.2rem; }
+
+  dialog {
+    border: 1px solid var(--line); border-radius: 12px; padding: 0;
+    background: var(--card); color: var(--ink); width: min(880px, 94vw);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg-head, .dlg-foot { padding: .9rem 1rem; display: flex; gap: .5rem; align-items: center; }
+  .dlg-head { border-bottom: 1px solid var(--line); font-weight: 600; }
+  .dlg-foot { border-top: 1px solid var(--line); }
+  .dlg-body { padding: 1rem; max-height: 70vh; overflow: auto; }
+  .section { margin-top: 1rem; margin-bottom: .35rem; font-size: .72rem;
+             text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  pre.logs {
+    margin: 0; padding: .7rem; background: var(--bg); border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .74rem;
+    white-space: pre-wrap; word-break: break-word; max-height: 60vh; overflow: auto;
+  }
+  .empty { color: var(--muted); padding: 1.1rem; text-align: center; font-size: .9rem; }
+  #toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    border-radius: 8px; padding: .6rem .9rem; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+    max-width: 90vw; display: none;
+  }
+  #toast.bad { border-left-color: var(--bad); }
 </style>
 </head>
 <body>
 
 <header>
-  <h1>Snapcast Player Panel</h1>
-  <span id="serverChip" class="badge"></span>
+  <h1>🔊 Snapcast Players</h1>
+  <span class="summary" id="summary"></span>
+  <span class="spacer"></span>
+  <span class="badge" id="serverChip"></span>
+  <a id="snapweb" href="#" target="_blank" rel="noopener"><button type="button">Snapweb</button></a>
+  <button id="themeToggle" title="theme">🌗</button>
   <button id="btnSettings">Settings</button>
   <button id="btnAdd" class="primary">Add player</button>
 </header>
 
 <main>
+  <div id="warnings"></div>
   <div class="card">
-    <h2>Players <span class="muted" id="playerCount"></span></h2>
+    <h2>Players</h2>
     <div class="wrap">
       <table>
+        <colgroup>
+          <col class="c-name"><col class="c-output"><col class="c-np"><col class="c-server">
+          <col class="c-state"><col class="c-uptime"><col class="c-actions">
+        </colgroup>
         <thead>
-          <tr><th>Player</th><th>Now playing</th><th>State</th><th>Actions</th></tr>
+          <tr>
+            <th>Name</th><th>Output</th><th>Now playing</th><th>Server</th>
+            <th>State</th><th class="nowrap">Uptime</th>
+            <th style="text-align:right">Actions</th>
+          </tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
     <div class="empty" id="empty">No players yet. <b>Add player</b> creates one and starts it.</div>
-  </div>
-
-  <div class="card">
-    <h2>Outputs PipeWire is offering <span class="muted" id="sinkCount"></span></h2>
-    <div class="wrap"><table><tbody id="sinkRows"></tbody></table></div>
-    <div class="empty" id="sinkEmpty">
-      No sinks visible. Check that the PipeWire socket is mounted into this container.
-    </div>
   </div>
 </main>
 
@@ -194,52 +234,60 @@
       <div class="grid">
         <div>
           <label for="f_name">Name (shown here and on the server)</label>
-          <input id="f_name" required maxlength="64">
+          <input id="f_name" required maxlength="64" autofocus>
         </div>
         <div>
           <label for="f_client_id">CLIENT_ID (--hostID, blank = name)</label>
           <input id="f_client_id" maxlength="64">
         </div>
       </div>
-      <p></p>
-      <label for="f_node">Output sink (PIPEWIRE_NODE, blank = default sink)</label>
-      <div class="row">
-        <select id="f_node_pick" style="flex:1"></select>
-        <button type="button" id="btnRefreshSinks">Refresh</button>
+
+      <div class="section">Output</div>
+      <label for="f_output">Where this player sends audio</label>
+      <select id="f_output"></select>
+      <div id="customWrap" hidden style="margin-top:.5rem">
+        <label for="f_alsa_custom">ALSA device name</label>
+        <input id="f_alsa_custom" class="mono" placeholder="hw:CARD=Codec,DEV=0">
       </div>
-      <input id="f_node" class="mono" placeholder="alsa_output.usb-Topping_DX5-00.analog-stereo" style="margin-top:6px">
-      <p></p>
+
+      <div class="section">Server</div>
       <div class="grid">
         <div><label for="f_server">Snapserver (SERVER_IP)</label><input id="f_server" required></div>
-        <div><label for="f_port">Stream port (SNAP_PORT)</label><input id="f_port" type="number" min="1" max="65535"></div>
+        <div><label for="f_port">Stream port</label><input id="f_port" type="number" min="1" max="65535"></div>
         <div><label for="f_control_port">Control port</label><input id="f_control_port" type="number" min="1" max="65535"></div>
+      </div>
+
+      <div class="section">Tuning</div>
+      <div class="grid">
         <div>
-          <label for="f_pipewire_latency">PIPEWIRE_LATENCY</label>
+          <label for="f_pipewire_latency">PIPEWIRE_LATENCY (PipeWire output only)</label>
           <input id="f_pipewire_latency" class="mono" placeholder="2048/192000">
         </div>
         <div><label for="f_latency_ms">Latency correction (ms)</label><input id="f_latency_ms" type="number" min="-2000" max="2000"></div>
         <div><label for="f_volume">Initial volume (0.0-1.0)</label><input id="f_volume" type="number" min="0" max="1" step="0.05"></div>
       </div>
-      <p></p>
-      <label for="f_extra">SNAP_EXTRA (extra snapclient arguments)</label>
-      <input id="f_extra" class="mono" maxlength="200" placeholder="--sampleformat 48000:24:2">
-      <p></p>
-      <div class="row"><input type="checkbox" id="f_use_alsa" style="width:auto"><label for="f_use_alsa" style="margin:0">USE_ALSA &mdash; route through the ALSA bridge instead of native PipeWire</label></div>
-      <div class="row"><input type="checkbox" id="f_autostart" style="width:auto"><label for="f_autostart" style="margin:0">Start automatically when the panel starts</label></div>
+      <div style="margin-top:.8rem">
+        <label for="f_extra">SNAP_EXTRA (extra snapclient arguments)</label>
+        <input id="f_extra" class="mono" maxlength="200" placeholder="--sampleformat 48000:24:2">
+      </div>
+      <div class="checkline">
+        <input type="checkbox" id="f_autostart">
+        <label for="f_autostart">Start automatically when the panel starts</label>
+      </div>
     </div>
     <div class="dlg-foot">
-      <button type="button" id="btnDelete" class="danger" hidden>Delete</button>
-      <span style="flex:1"></span>
+      <button type="button" id="btnDelete" class="danger" hidden>Delete player</button>
+      <span class="spacer"></span>
       <button type="button" data-close>Cancel</button>
-      <button type="submit" class="primary" id="btnSave">Save</button>
+      <button type="submit" class="primary">Save</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="dlgLogs">
-  <div class="dlg-head">Logs &mdash; <span id="logName"></span></div>
+  <div class="dlg-head">Log &mdash; <span id="logName"></span></div>
   <div class="dlg-body"><pre class="logs" id="logBody"></pre></div>
-  <div class="dlg-foot"><button type="button" data-close>Close</button></div>
+  <div class="dlg-foot"><span class="spacer"></span><button type="button" data-close>Close</button></div>
 </dialog>
 
 <dialog id="dlgSettings">
@@ -255,7 +303,7 @@
       </div>
     </div>
     <div class="dlg-foot">
-      <span style="flex:1"></span>
+      <span class="spacer"></span>
       <button type="button" data-close>Cancel</button>
       <button type="submit" class="primary">Save</button>
     </div>
@@ -279,10 +327,10 @@
   const esc = (s) => String(s === null || s === undefined ? "" : s).replace(
     /[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-  let config = { poll_seconds: 5, snapserver: {} };
-  let sinks = [];
+  const CUSTOM = "__custom__";
+  const state = { config: {}, sinks: [], alsa: [], players: [] };
   let editing = null;
-  let timer = null;
+  let logTimer = null;
 
   function toast(message, bad) {
     const el = $("toast");
@@ -311,30 +359,97 @@
     body: JSON.stringify(body || {}),
   });
 
-  function secs(n) {
-    n = Math.floor(n || 0);
+  function uptime(seconds) {
+    const n = Math.floor(seconds || 0);
+    if (!n) return "—";
     if (n < 60) return n + "s";
     if (n < 3600) return Math.floor(n / 60) + "m";
     return Math.floor(n / 3600) + "h" + Math.floor((n % 3600) / 60) + "m";
+  }
+
+  // ---- output ---------------------------------------------------------------
+
+  function describeOutput(p) {
+    if (p.output_mode === "alsa") return "ALSA · " + (p.alsa_device || "default");
+    return p.node || "default sink";
+  }
+
+  function outputValue(p) {
+    return p.output_mode === "alsa"
+      ? "alsa:" + (p.alsa_device || "default")
+      : "pw:" + (p.node || "");
+  }
+
+  function outputFields(value) {
+    if (value.startsWith("alsa:")) {
+      const device = value.slice(5);
+      return {
+        output_mode: "alsa",
+        alsa_device: device === CUSTOM ? $("f_alsa_custom").value.trim() : device,
+        node: "",
+      };
+    }
+    return { output_mode: "pipewire", node: value.slice(3), alsa_device: "default" };
+  }
+
+  function syncCustomField() {
+    $("customWrap").hidden = $("f_output").value !== "alsa:" + CUSTOM;
+  }
+
+  function renderOutputOptions(selected) {
+    const select = $("f_output");
+    const parts = ['<optgroup label="PipeWire"><option value="pw:">Default sink</option>'];
+    for (const sink of state.sinks) {
+      parts.push(`<option value="pw:${esc(sink.node)}">${esc(sink.description)}` +
+        (sink.bluetooth ? " (BT)" : "") + `</option>`);
+    }
+    parts.push("</optgroup>", '<optgroup label="ALSA (bypasses PipeWire)">');
+    for (const dev of state.alsa) {
+      parts.push(`<option value="alsa:${esc(dev.device)}">${esc(dev.device)}` +
+        (dev.description && dev.description !== dev.device
+          ? " — " + esc(dev.description) : "") + `</option>`);
+    }
+    // Enumeration needs the sound devices passed through; without that the list
+    // is empty, so typing a device by hand has to stay possible.
+    parts.push(`<option value="alsa:${CUSTOM}">Custom ALSA device…</option>`, "</optgroup>");
+    select.innerHTML = parts.join("");
+
+    if (selected) {
+      // A configured output that is not present right now must stay selectable,
+      // or opening Edit would silently rebind the player to something else.
+      if (!Array.prototype.some.call(select.options, (o) => o.value === selected)) {
+        if (selected.startsWith("alsa:")) {
+          $("f_alsa_custom").value = selected.slice(5);
+          selected = "alsa:" + CUSTOM;
+        } else {
+          const opt = document.createElement("option");
+          opt.value = selected;
+          opt.textContent = selected.replace(/^pw:/, "") + " (not present)";
+          select.appendChild(opt);
+        }
+      }
+      select.value = selected;
+    }
+    syncCustomField();
   }
 
   // ---- rendering ------------------------------------------------------------
 
   function nowPlaying(p) {
     // A stopped player has no snapclient process, so it is not playing anything
-    // and its transport would be acting on a client that is not there. The
-    // snapserver still remembers the client and its last stream, so without this
-    // the row keeps showing a track for a player that is plainly stopped.
+    // and its transport would act on a client that is not there. The snapserver
+    // still remembers the client and its last stream, so without this the row
+    // keeps showing a track for a player that is plainly stopped.
     if (!p.running) {
       return `<span class="muted">${p.state === "stopped" ? "player stopped"
                                   : "player " + esc(p.state)}</span>`;
     }
-    if (p.snapcast_error) return `<span class="muted">${esc(p.snapcast_error)}</span>`;
+    if (p.snapcast_error) {
+      return `<span class="muted truncate" title="${esc(p.snapcast_error)}">${esc(p.snapcast_error)}</span>`;
+    }
     const s = p.snapcast;
     if (!s) return '<span class="muted">not known to the snapserver yet</span>';
-    if (s.connected === false) {
-      return '<span class="muted">not connected to the snapserver</span>';
-    }
+    if (s.connected === false) return '<span class="muted">not connected</span>';
 
     // Paused is NOT "nothing to control": Music Assistant parks the group on a
     // stream that reports canControl=false, so the panel keeps driving the last
@@ -345,8 +460,6 @@
     const art = s.art_url
       ? `<img src="${esc(s.art_url)}" alt="" title="${esc(full)}" onerror="this.style.display='none'">`
       : "";
-    // The cell is narrow and the text is ellipsised, so the full strings go in
-    // title= -- hovering a truncated track name shows all of it.
     const text = s.title
       ? `<div class="np-title" title="${esc(full)}">${esc(s.title)}</div>` +
         `<div class="np-artist" title="${esc(full)}">${paused ? "paused &middot; " : ""}` +
@@ -371,56 +484,61 @@
     }
 
     const vol = (s.volume === null || s.volume === undefined) ? "" :
-      `<div class="vol">
-         <button data-mute="${s.muted ? 1 : 0}" title="${s.muted ? "Unmute" : "Mute"}">${s.muted ? "&#128263;" : "&#128266;"}</button>
-         <input type="range" min="0" max="100" value="${Number(s.volume)}">
-         <span>${Number(s.volume)}%</span>
-       </div>`;
+      `<span class="vol">` +
+      `<button data-mute="${s.muted ? 1 : 0}" title="${s.muted ? "Unmute" : "Mute"}">${s.muted ? "&#128263;" : "&#128266;"}</button>` +
+      `<input type="range" min="0" max="100" value="${Number(s.volume)}">` +
+      `<span>${Number(s.volume)}%</span></span>`;
 
-    return `<div class="np">${art}<div class="np-text">${text}</div>${controls}</div>${vol}`;
+    const strip = (controls || vol)
+      ? `<div class="np-controls">${controls}${vol}</div>` : "";
+    return `<div class="np">${art}<div class="np-text">${text}</div></div>${strip}`;
   }
 
-  function snapwebLink(p) {
-    const port = (config.snapserver && config.snapserver.web_port) || 1780;
-    const host = p.server || location.hostname;
-    return `<a href="http://${esc(host)}:${port}/" target="_blank" rel="noopener">` +
-           `<button type="button" title="Open Snapweb">Snapweb</button></a>`;
+  function renderWarnings() {
+    const list = (state.config && state.config.warnings) || [];
+    $("warnings").innerHTML = list.map((w) => `<div class="warn">⚠️ ${esc(w)}</div>`).join("");
   }
 
-  function render(players) {
+  function render() {
+    const players = state.players;
     const rows = $("rows");
     rows.replaceChildren();
-    $("playerCount").textContent = players.length ? `(${players.length})` : "";
-    $("empty").style.display = players.length ? "none" : "block";
+    $("empty").hidden = players.length > 0;
+    const running = players.filter((p) => p.running).length;
+    $("summary").textContent = players.length
+      ? `${running} of ${players.length} running` : "";
 
     for (const p of players) {
+      const out = describeOutput(p);
       const tr = document.createElement("tr");
       // An absent sink is the normal state for a powered-off DAC, so say so
       // plainly rather than flagging it as an error.
-      const sink = p.node
-        ? `<div class="sink-row"><div class="sink" title="${esc(p.node)}">${esc(p.node)}</div>` +
-          (p.node_present === false ? `<span class="badge absent">absent</span>` : "") + `</div>`
-        : `<span class="muted">default sink</span>`;
-      const meta = p.running
-        ? `<span class="meta"> up ${secs(p.uptime)}</span>`
-        : (p.restarts ? `<span class="meta"> ${p.restarts} restarts</span>` : "");
+      const absent = p.node_present === false
+        ? ` <span class="badge absent">absent</span>` : "";
+      const alsa = p.output_mode === "alsa" ? ` <span class="badge alsa">ALSA</span>` : "";
 
       tr.innerHTML =
-        `<td><b>${esc(p.name)}</b>` +
-          (p.client_id !== p.name ? ` <span class="badge">${esc(p.client_id)}</span>` : "") +
-          sink + `</td>` +
+        `<td><b class="truncate" title="${esc(p.name)}">${esc(p.name)}</b>` +
+          (p.client_id !== p.name
+            ? `<span class="meta truncate" title="${esc(p.client_id)}">${esc(p.client_id)}</span>` : "") +
+          `</td>` +
+        `<td><span class="mono truncate" title="${esc(out)}">${esc(out)}</span>${alsa}${absent}</td>` +
         `<td>${nowPlaying(p)}</td>` +
-        `<td class="state-cell"><span class="state ${esc(p.state)}">${esc(p.state)}</span>${meta}` +
-          (p.detail ? `<div class="meta">${esc(p.detail)}</div>` : "") +
-          `<div class="meta">${esc(p.server)}:${Number(p.port)}</div></td>` +
-        `<td class="actions-cell"><span class="grp">` +
+        `<td class="meta"><span class="truncate" title="${esc(p.server)}:${Number(p.port)}">` +
+          `${esc(p.server)}:${Number(p.port)}</span></td>` +
+        `<td><span class="state ${esc(p.state)}">${esc(p.state)}</span>` +
+          (p.detail ? `<div class="meta truncate" title="${esc(p.detail)}">${esc(p.detail)}</div>` : "") +
+          (p.restarts ? `<div class="meta">${Number(p.restarts)} restarts</div>` : "") +
+          `</td>` +
+        `<td class="meta nowrap">${uptime(p.uptime)}</td>` +
+        `<td><div class="actions">` +
           (p.running || p.state === "waiting" || p.state === "backoff"
-            ? `<button data-do="stop">Stop</button><button data-do="restart">Restart</button>`
-            : `<button data-do="start" class="primary">Start</button>`) +
-          `<button data-do="logs">Logs</button>` +
-          snapwebLink(p) +
-          `<button data-do="edit">Edit</button>` +
-        `</span></td>`;
+            ? `<button class="small" data-do="stop">Stop</button>`
+            : `<button class="small primary" data-do="start">Start</button>`) +
+          `<button class="small" data-do="restart">Restart</button>` +
+          `<button class="small" data-do="logs">Log</button>` +
+          `<button class="small" data-do="edit">Edit</button>` +
+        `</div></td>`;
 
       tr.querySelectorAll("button[data-do]").forEach((b) =>
         b.addEventListener("click", () => action(b.dataset.do, p)));
@@ -436,67 +554,47 @@
     }
   }
 
-  function renderSinks() {
-    const rows = $("sinkRows");
-    rows.replaceChildren();
-    $("sinkCount").textContent = sinks.length ? `(${sinks.length})` : "";
-    $("sinkEmpty").style.display = sinks.length ? "none" : "block";
-    for (const s of sinks) {
-      const tr = document.createElement("tr");
-      tr.innerHTML =
-        `<td>${esc(s.description)}${s.bluetooth ? ' <span class="badge">BT</span>' : ""}` +
-          `<div class="mono meta">${esc(s.node)}</div></td>` +
-        `<td style="text-align:right"><button type="button">Add player</button></td>`;
-      tr.querySelector("button").addEventListener("click", () => openPlayer(null, s));
-      rows.appendChild(tr);
-    }
-
-    const pick = $("f_node_pick");
-    pick.replaceChildren();
-    const blank = document.createElement("option");
-    blank.value = ""; blank.textContent = "-- default sink --";
-    pick.appendChild(blank);
-    for (const s of sinks) {
-      const opt = document.createElement("option");
-      opt.value = s.node;
-      opt.textContent = s.description + (s.bluetooth ? " (BT)" : "");
-      pick.appendChild(opt);
-    }
-  }
-
   // ---- actions --------------------------------------------------------------
 
   async function action(what, p) {
     if (what === "edit") return openPlayer(p);
     if (what === "logs") return showLogs(p);
     const data = await call(`api/players/${p.id}/${what}`, postJSON());
-    if (data.players) render(data.players);
+    if (data.players) { state.players = data.players; render(); }
   }
 
   async function sendControl(p, command) {
     const data = await call(`api/players/${p.id}/control/${command}`, postJSON());
-    if (data.players) render(data.players);
+    if (data.players) { state.players = data.players; render(); }
   }
 
   async function showLogs(p) {
     $("logName").textContent = p.name;
-    const data = await call(`api/players/${p.id}/logs`);
-    $("logBody").textContent = (data.logs || []).join("\n") || "(no output yet)";
+    const load = async () => {
+      const data = await call(`api/players/${p.id}/logs`);
+      const box = $("logBody");
+      const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+      box.textContent = (data.logs || []).join("\n") || "(no output yet)";
+      if (stick) box.scrollTop = box.scrollHeight;
+    };
+    await load();
     $("dlgLogs").showModal();
     $("logBody").scrollTop = $("logBody").scrollHeight;
+    clearInterval(logTimer);
+    logTimer = setInterval(load, 2000);   // keep it live while it is open
   }
 
-  function openPlayer(player, sink) {
+  function openPlayer(player) {
     editing = player || null;
     const d = player || {};
     $("dlgTitle").textContent = player ? "Edit player" : "Add player";
     $("btnDelete").hidden = !player;
 
-    const defaults = config.defaults || {};
-    $("f_name").value = d.name || (sink ? sink.description : "");
+    const defaults = state.config.defaults || {};
+    $("f_name").value = d.name || "";
     $("f_client_id").value = d.client_id && d.client_id !== d.name ? d.client_id : "";
-    $("f_node").value = d.node || (sink ? sink.node : "");
-    $("f_node_pick").value = $("f_node").value;
+    $("f_alsa_custom").value = d.output_mode === "alsa" ? (d.alsa_device || "") : "";
+    renderOutputOptions(player ? outputValue(player) : "pw:");
     $("f_server").value = d.server || defaults.server || "";
     $("f_port").value = d.port || defaults.port || 1704;
     $("f_control_port").value = d.control_port || defaults.control_port || 1705;
@@ -504,16 +602,14 @@
     $("f_latency_ms").value = d.latency_ms || 0;
     $("f_volume").value = d.volume === undefined ? 1 : d.volume;
     $("f_extra").value = d.extra || "";
-    $("f_use_alsa").checked = !!d.use_alsa;
     $("f_autostart").checked = player ? !!d.autostart : true;
     $("dlgPlayer").showModal();
   }
 
   function formBody() {
-    return {
+    return Object.assign({
       name: $("f_name").value,
       client_id: $("f_client_id").value,
-      node: $("f_node").value,
       server: $("f_server").value,
       port: Number($("f_port").value),
       control_port: Number($("f_control_port").value),
@@ -521,29 +617,52 @@
       latency_ms: Number($("f_latency_ms").value),
       volume: Number($("f_volume").value),
       extra: $("f_extra").value,
-      use_alsa: $("f_use_alsa").checked,
       autostart: $("f_autostart").checked,
-    };
+    }, outputFields($("f_output").value));
   }
 
   async function refresh() {
     const data = await call("api/players");
-    if (data.players) render(data.players);
+    if (data.players) { state.players = data.players; render(); }
   }
 
-  async function refreshSinks() {
+  async function refreshOutputs() {
     const data = await call("api/sinks");
-    sinks = data.sinks || [];
-    renderSinks();
+    if (data.sinks) state.sinks = data.sinks;
+    if (data.alsa) state.alsa = data.alsa;
+    if (data.warnings) { state.config.warnings = data.warnings; renderWarnings(); }
   }
+
+  // ---- theme ----------------------------------------------------------------
+
+  const THEMES = ["system", "light", "dark"];
+  const THEME_ICON = { system: "🌗", light: "☀️", dark: "🌙" };
+
+  function currentTheme() {
+    try { return localStorage.getItem("snapcast-panel-theme") || "system"; }
+    catch (_) { return "system"; }   // private mode
+  }
+
+  function applyTheme(theme) {
+    if (theme === "system") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", theme);
+    const btn = $("themeToggle");
+    btn.textContent = THEME_ICON[theme];
+    btn.title = `theme: ${theme} (click to change)`;
+    try { localStorage.setItem("snapcast-panel-theme", theme); } catch (_) { /* private mode */ }
+  }
+
+  applyTheme(currentTheme());
+  $("themeToggle").addEventListener("click", () =>
+    applyTheme(THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length]));
 
   // ---- wiring ---------------------------------------------------------------
 
   document.querySelectorAll("[data-close]").forEach((b) =>
     b.addEventListener("click", () => b.closest("dialog").close()));
+  $("dlgLogs").addEventListener("close", () => clearInterval(logTimer));
 
-  $("f_node_pick").addEventListener("change", () => { $("f_node").value = $("f_node_pick").value; });
-  $("btnRefreshSinks").addEventListener("click", refreshSinks);
+  $("f_output").addEventListener("change", syncCustomField);
   $("btnAdd").addEventListener("click", () => openPlayer(null));
 
   $("formPlayer").addEventListener("submit", async (event) => {
@@ -557,7 +676,7 @@
     if (data.error) return;           // dialog stays open so the input can be fixed
     $("dlgPlayer").close();
     toast(editing ? "Player updated" : "Player created");
-    if (data.players) render(data.players);
+    if (data.players) { state.players = data.players; render(); }
   });
 
   $("btnDelete").addEventListener("click", async () => {
@@ -566,7 +685,7 @@
     if (data.error) return;
     $("dlgPlayer").close();
     toast("Player deleted");
-    if (data.players) render(data.players);
+    if (data.players) { state.players = data.players; render(); }
   });
 
   $("btnSettings").addEventListener("click", async () => {
@@ -598,15 +717,20 @@
 
   async function boot(full) {
     const data = await call("api/config");
-    if (!data.error) config = data;
-    const s = config.snapserver || {};
-    $("serverChip").textContent = "snapserver " + (s.host || "127.0.0.1") + ":" + (s.port || 1704);
+    if (!data.error) {
+      state.config = data;
+      state.sinks = data.sinks || [];
+      state.alsa = data.alsa || [];
+    }
+    const s = state.config.snapserver || {};
+    const host = s.host || location.hostname;
+    $("serverChip").textContent = `snapserver ${host}:${s.port || 1704}`;
+    $("snapweb").href = `http://${host}:${s.web_port || 1780}/`;
+    renderWarnings();
     if (full) {
-      await refreshSinks();
-      clearInterval(timer);
-      timer = setInterval(() => { refresh(); }, (config.poll_seconds || 5) * 1000);
-      // Sinks change far less often than player state.
-      setInterval(refreshSinks, Math.max(15, (config.poll_seconds || 5) * 4) * 1000);
+      setInterval(refresh, (state.config.poll_seconds || 5) * 1000);
+      // Outputs change far less often than player state.
+      setInterval(refreshOutputs, Math.max(15, (state.config.poll_seconds || 5) * 4) * 1000);
     }
     await refresh();
   }

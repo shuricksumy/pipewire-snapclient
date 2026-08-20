@@ -13,6 +13,7 @@ import atexit
 import hmac
 import logging
 import os
+import shutil
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -86,12 +87,39 @@ def index():
     return send_from_directory(app.static_folder, "index.html")
 
 
+def startup_warnings(alsa):
+    """Things the panel can see are wrong that a user cannot guess from a log."""
+    warnings = []
+    if alsa and not any(d["hardware"] for d in alsa):
+        warnings.append(
+            "No ALSA hardware devices are visible, only conversion plugins. The "
+            "ALSA output mode needs the sound devices passed through as devices, "
+            "not as a volume: 'devices: [/dev/snd:/dev/snd]' in compose. "
+            "(-v /dev/snd mounts the nodes but the device cgroup still blocks "
+            "opening them.) PipeWire output is unaffected."
+        )
+    if not players_mod.list_sinks():
+        warnings.append(
+            "PipeWire is not reachable, so no sinks can be listed. Check the "
+            "socket bind mount, e.g. '/run/user/1000/pipewire-0:/tmp/pipewire-0'. "
+            "An ALSA output still works without it."
+        )
+    if not shutil.which(players_mod.SNAPCLIENT):
+        warnings.append("snapclient was not found on PATH (%s)."
+                        % players_mod.SNAPCLIENT)
+    return warnings
+
+
 @app.get("/api/config")
 def api_config():
+    alsa = players_mod.list_alsa_devices()
     return jsonify(
         poll_seconds=POLL_SECONDS,
         auth=bool(ADMIN_PASSWORD),
         defaults=supervisor.new_player_defaults(),
+        sinks=players_mod.list_sinks(),
+        alsa=alsa,
+        warnings=startup_warnings(alsa),
         # From the stored settings, not the environment: the environment only
         # seeds them and the web UI can change them afterwards.
         snapserver={
@@ -116,8 +144,10 @@ def api_patch_settings():
 
 @app.get("/api/sinks")
 def api_sinks():
-    """PipeWire sinks available right now -- what a player can be bound to."""
-    return jsonify(sinks=players_mod.list_sinks())
+    """Everything a player can be pointed at: PipeWire sinks and ALSA devices."""
+    alsa = players_mod.list_alsa_devices()
+    return jsonify(sinks=players_mod.list_sinks(), alsa=alsa,
+                   warnings=startup_warnings(alsa))
 
 
 @app.get("/api/players")

@@ -153,7 +153,7 @@ RUN groupadd -g 1000 snapcast && \
     useradd -u 1000 -g 1000 -G audio -M -s /usr/sbin/nologin snapcast && \
     install -d -o 1000 -g 1000 /home/snapcast /config
 
-ENV ROLE="snapclient" \
+ENV ROLE="panel" \
     SNAP_PORT="1704" \
     SERVER_IP="127.0.0.1" \
     CLIENT_ID="Snap-Node" \

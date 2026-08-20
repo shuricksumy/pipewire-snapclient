@@ -151,12 +151,28 @@ def test_start_launches_snapclient_with_the_right_arguments(supervisor):
     assert player.state == "stopped"
 
 
-def test_use_alsa_switches_the_player_backend(supervisor):
-    player = make(supervisor, use_alsa=True)
+def test_alsa_output_addresses_the_device_directly(supervisor):
+    """The escape hatch for a host where PipeWire is broken or absent."""
+    player = make(supervisor, output_mode="alsa", alsa_device="hw:CARD=DX5,DEV=0", node="")
     player.start()
     assert wait_for(lambda: any("snapclient args" in line for line in player.logs))
-    assert "--player alsa -s default" in "\n".join(player.logs)
+    logs = "\n".join(player.logs)
+    assert "--player alsa -s hw:CARD=DX5,DEV=0" in logs
+    # PIPEWIRE_NODE/LATENCY steer the graph, which an ALSA output is not in.
+    assert "PIPEWIRE_NODE=\n" in logs or "PIPEWIRE_NODE=" in logs.split("\n")[-3]
     player.stop()
+
+
+def test_a_legacy_use_alsa_player_is_migrated(supervisor):
+    """Players stored before the output picker carried use_alsa. They must not
+    silently move back onto PipeWire the next time their config is written."""
+    clean = validate({"name": "Old", "server": "127.0.0.1", "use_alsa": True})
+    assert clean["output_mode"] == "alsa"
+    assert clean["alsa_device"] == "default"
+    assert "use_alsa" not in clean
+
+    off = validate({"name": "Old", "server": "127.0.0.1", "use_alsa": False})
+    assert off["output_mode"] == "pipewire"
 
 
 def test_extra_arguments_are_appended(supervisor):
@@ -375,12 +391,13 @@ def test_every_field_of_every_player_is_persisted(supervisor, tmp_path):
         "name": "Lounge · DX5", "client_id": "DX5-Snapclient",
         "node": "alsa_output.usb-Topping_DX5-00.analog-stereo",
         "server": "192.168.111.50", "port": 1804, "control_port": 1805,
-        "use_alsa": True, "pipewire_latency": "2048/192000", "latency_ms": -120,
+        "output_mode": "pipewire", "alsa_device": "default",
+        "pipewire_latency": "2048/192000", "latency_ms": -120,
         "volume": 0.55, "autostart": False, "extra": "--sampleformat 48000:24:2",
     }
-    second = dict(first, name="Kitchen", client_id="Kitchen-K3",
-                  node="alsa_output.usb-FiiO_K3-00.analog-stereo",
-                  use_alsa=False, autostart=True, latency_ms=0, volume=1.0)
+    second = dict(first, name="Kitchen", client_id="Kitchen-K3", node="",
+                  output_mode="alsa", alsa_device="hw:CARD=K3,DEV=0",
+                  autostart=True, latency_ms=0, volume=1.0)
     supervisor.create(dict(first, autostart=False))
     supervisor.create(dict(second, autostart=False))
 
@@ -502,3 +519,76 @@ def test_an_empty_snapserver_host_is_allowed(supervisor):
     """Empty means "the default", not an error."""
     supervisor.update_settings({"snapserver_host": ""})
     assert supervisor.new_player_defaults()["server"] == "127.0.0.1"
+
+
+# ---- ALSA enumeration -------------------------------------------------------
+
+
+def test_alsa_devices_are_parsed_from_snapclient_l(monkeypatch):
+    """snapclient prints "<index>: <name>" with the description on the next line."""
+    monkeypatch.setattr(players_mod, "SNAPCLIENT", FAKE)
+    monkeypatch.setenv("FAKE_ALSA_MODE", "hardware")
+    devices = players_mod.list_alsa_devices(max_age=0)
+
+    by_name = {d["device"]: d for d in devices}
+    assert "hw:CARD=DX5,DEV=0" in by_name
+    assert by_name["hw:CARD=DX5,DEV=0"]["description"].startswith("Topping DX5")
+    # Hardware first: it is what somebody bypassing PipeWire is looking for.
+    assert devices[0]["hardware"] is True
+    assert by_name["lavrate"]["hardware"] is False
+
+
+def test_only_plugins_means_dev_snd_was_not_passed_through(monkeypatch):
+    monkeypatch.setattr(players_mod, "SNAPCLIENT", FAKE)
+    monkeypatch.setenv("FAKE_ALSA_MODE", "plugins")
+    devices = players_mod.list_alsa_devices(max_age=0)
+    assert devices, "the plugin entries should still be listed"
+    assert not any(d["hardware"] for d in devices)
+
+
+def test_the_alsa_listing_is_cached(monkeypatch):
+    """It costs a subprocess and the browser polls; the list only changes when
+    hardware is plugged in."""
+    monkeypatch.setattr(players_mod, "SNAPCLIENT", FAKE)
+    players_mod.list_alsa_devices(max_age=0)
+    calls = []
+    monkeypatch.setattr(players_mod.subprocess, "run",
+                        lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(OSError()))
+    players_mod.list_alsa_devices()
+    assert calls == [], "a cached listing still shelled out"
+
+
+def test_a_missing_binary_offers_no_alsa_choices(monkeypatch):
+    monkeypatch.setattr(players_mod, "SNAPCLIENT", "/nonexistent/snapclient")
+    assert players_mod.list_alsa_devices(max_age=0) == []
+
+
+@pytest.mark.parametrize("bad", ["", "has spaces", "semi;colon"])
+def test_an_alsa_output_needs_a_valid_device(bad):
+    with pytest.raises(PlayerError) as err:
+        validate({"name": "X", "server": "127.0.0.1",
+                  "output_mode": "alsa", "alsa_device": bad})
+    assert "alsa" in str(err.value).lower() or "device" in str(err.value).lower()
+
+
+def test_an_unknown_output_mode_is_rejected():
+    with pytest.raises(PlayerError) as err:
+        validate({"name": "X", "server": "127.0.0.1", "output_mode": "jack"})
+    assert "output mode" in str(err.value).lower()
+
+
+def test_an_alsa_player_is_not_watchdogged(supervisor, monkeypatch):
+    """An ALSA device is not in the PipeWire graph: there is no sink to poll,
+    and snapclient reports the device failing by itself."""
+    monkeypatch.setattr(players_mod, "HEALTH_INTERVAL", 0.1)
+    monkeypatch.setattr(players_mod, "SINK_GRACE", 0.3)
+    monkeypatch.setattr(players_mod, "sink_present", lambda node: False)
+
+    player = make(supervisor, name="Direct", output_mode="alsa",
+                  alsa_device="hw:CARD=DX5,DEV=0", node="")
+    player.start()
+    assert wait_for(lambda: player.state == "running"), player.state
+    time.sleep(1.0)
+    assert player.state == "running"
+    assert player.restarts == 0
+    player.stop()

@@ -10,7 +10,7 @@ services:
     network_mode: host
 
     environment:
-      - ROLE=snapserver
+      - ROLE=snapserver   # required: the image defaults to the web panel
       - SNAP_PORT=1704
       #- EXTRA_ARGS=--server.threads=4   # appended to the snapserver command line
 

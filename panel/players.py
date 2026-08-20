@@ -8,8 +8,9 @@ instead of one container per DAC.
 The launch recipe mirrors entrypoint.sh's ROLE=snapclient (same env, same
 arguments, same 5s->60s reconnect backoff that resets after a healthy session),
 so a player here behaves exactly like a snapclient container this image
-produces. Anything you could set with SERVER_IP / CLIENT_ID / USE_ALSA /
-PIPEWIRE_NODE / PIPEWIRE_LATENCY / SNAP_EXTRA is a field on a player.
+produces. Anything you could set with SERVER_IP / CLIENT_ID / PIPEWIRE_NODE /
+PIPEWIRE_LATENCY / SNAP_EXTRA is a field on a player, and a player can send its
+audio to an ALSA device directly instead of through PipeWire.
 
 Trade-off worth knowing: restarting this container stops every player. The
 container-per-player approach survives a panel restart; this one does not.
@@ -66,6 +67,8 @@ LOG_LINES = 200
 # would reject perfectly reasonable names like "Kitchen · DX5" or Cyrillic ones.
 NAME_RE = re.compile(r"[^\x00-\x1f\x7f]{1,64}")
 NODE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+# ALSA PCM names are richer than node names: "hw:CARD=Codec,DEV=0", "plughw:1,0".
+ALSA_DEVICE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:=,+/()-]{0,127}$")
 HOST_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.:_-]{0,255}$")
 LATENCY_RE = re.compile(r"^\d{1,7}/\d{1,7}$")
 
@@ -92,10 +95,14 @@ DEFAULT_LATENCY = os.environ.get("PIPEWIRE_LATENCY", "") or ""
 DEFAULTS = {
     "name": "",
     "client_id": "",
+    # "pipewire" plays into the host's PipeWire session and binds to one sink.
+    # "alsa" talks to an ALSA device directly, which is the way out when
+    # PipeWire is broken, absent, or simply not what you want on this host.
+    "output_mode": "pipewire",
     "node": "",
+    "alsa_device": "default",
     "server": SNAPSERVER_HOST or "127.0.0.1",
     "port": SNAPSERVER_PORT,
-    "use_alsa": False,
     "pipewire_latency": DEFAULT_LATENCY,
     "latency_ms": 0,
     "volume": 1.0,
@@ -211,6 +218,66 @@ def list_sinks():
     return sinks
 
 
+_alsa_cache = {"at": 0.0, "devices": []}
+ALSA_CACHE_SECONDS = 30.0
+
+
+def list_alsa_devices(max_age=ALSA_CACHE_SECONDS):
+    """ALSA outputs, straight from `snapclient -l`.
+
+    This is the escape hatch for a host where PipeWire is broken or was never
+    set up: snapclient can address the hardware itself. Best effort -- if the
+    binary is missing the panel simply offers no ALSA choices.
+
+    snapclient prints "<index>: <name>" with the description on the next line,
+    so the name is what gets stored; `-s` takes an index or a name, and the name
+    survives devices being plugged in and renumbered.
+    """
+    # Cached: the list only changes when hardware is plugged in, while the panel
+    # polls its config every few seconds and this costs a subprocess.
+    if max_age and time.time() - _alsa_cache["at"] < max_age:
+        return _alsa_cache["devices"]
+
+    if not shutil.which(SNAPCLIENT) and not os.path.exists(SNAPCLIENT):
+        return []
+    try:
+        raw = subprocess.run(
+            [SNAPCLIENT, "-l"], capture_output=True, text=True, timeout=15,
+            env=_pw_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        _alsa_cache.update(at=time.time(), devices=[])
+        return []
+
+    devices = []
+    pending = None
+    for line in (raw.stdout or "").splitlines():
+        head = re.match(r"^\s*(\d+):\s*(\S.*)$", line)
+        if head:
+            pending = {"device": head.group(2).strip(), "description": ""}
+            if ALSA_DEVICE_RE.match(pending["device"]):
+                devices.append(pending)
+            else:
+                pending = None
+            continue
+        if pending is not None and line.strip():
+            pending["description"] = line.strip()
+            pending = None
+
+    for device in devices:
+        name = device["device"]
+        # Entries that address hardware rather than a conversion plugin. Shown
+        # first because they are what somebody bypassing PipeWire is looking for.
+        device["hardware"] = name.startswith(
+            ("hw:", "plughw:", "sysdefault", "front:", "iec958:", "dmix:")
+        ) or name == "default"
+        device["description"] = device["description"] or name
+
+    devices.sort(key=lambda d: (not d["hardware"], d["device"]))
+    _alsa_cache.update(at=time.time(), devices=devices)
+    return devices
+
+
 def sink_present(node):
     return any(s["node"] == node for s in list_sinks())
 
@@ -240,8 +307,16 @@ def validate(config, existing_names=(), existing_ids=()):
     still keep obvious nonsense out of the config file and give the user a real
     error instead of a snapclient that dies three seconds after it starts.
     """
+    config = dict(config or {})
+    # Players stored before the output picker existed carry use_alsa, which meant
+    # "the ALSA bridge to pcm.default". Translate rather than silently moving
+    # them back onto PipeWire when their config is next written out.
+    if "use_alsa" in config and "output_mode" not in config:
+        config["output_mode"] = "alsa" if config.pop("use_alsa") else "pipewire"
+        config.setdefault("alsa_device", "default")
+
     clean = dict(DEFAULTS)
-    clean.update({k: v for k, v in (config or {}).items() if k in DEFAULTS})
+    clean.update({k: v for k, v in config.items() if k in DEFAULTS})
 
     clean["name"] = str(clean["name"]).strip()
     if not NAME_RE.fullmatch(clean["name"]):
@@ -264,9 +339,20 @@ def validate(config, existing_names=(), existing_ids=()):
             "snapserver" % clean["client_id"]
         )
 
+    clean["output_mode"] = str(clean["output_mode"]).strip() or "pipewire"
+    if clean["output_mode"] not in ("pipewire", "alsa"):
+        raise PlayerError("output mode must be 'pipewire' or 'alsa'")
+
     clean["node"] = str(clean["node"]).strip()
     if clean["node"] and not NODE_RE.match(clean["node"]):
         raise PlayerError("invalid PipeWire node name")
+
+    clean["alsa_device"] = str(clean["alsa_device"]).strip()
+    if clean["output_mode"] == "alsa":
+        if not clean["alsa_device"]:
+            raise PlayerError("an ALSA output needs a device name")
+        if not ALSA_DEVICE_RE.match(clean["alsa_device"]):
+            raise PlayerError("invalid ALSA device name")
 
     clean["server"] = str(clean["server"]).strip()
     if not HOST_RE.match(clean["server"]):
@@ -304,7 +390,6 @@ def validate(config, existing_names=(), existing_ids=()):
     if clean["pipewire_latency"] and not LATENCY_RE.match(clean["pipewire_latency"]):
         raise PlayerError("PipeWire latency must look like 2048/192000")
 
-    clean["use_alsa"] = bool(clean["use_alsa"])
     clean["autostart"] = bool(clean["autostart"])
 
     # SNAP_EXTRA is split with shlex and appended to argv, never shell-evaluated.
@@ -462,7 +547,8 @@ class Player:
                 delay = min(delay * 2, RETRY_MAX)
                 continue
 
-            if self.config.get("volume") is not None and self.config.get("node"):
+            if (self._pipewire_output() and self.config.get("node")
+                    and self.config.get("volume") is not None):
                 set_sink_volume(self.config["node"], self.config["volume"])
 
             # The output pump has to run alongside the watchdog, not instead of
@@ -505,8 +591,12 @@ class Player:
                 self.detail = ""
 
     def _watch(self, proc):
-        """Wait for the child to exit, restarting it if its sink goes away."""
-        node = self.config.get("node")
+        """Wait for the child to exit, restarting it if its sink goes away.
+
+        PipeWire outputs only: an ALSA device is not in the graph, so there is
+        nothing to poll and snapclient reports the device failing by itself.
+        """
+        node = self.config.get("node") if self._pipewire_output() else None
         absent_since = None
         while proc.poll() is None:
             if not self.desired:
@@ -544,7 +634,7 @@ class Player:
 
     def _prepare(self):
         """Wait for the player's sink, so we do not launch into a missing DAC."""
-        node = self.config.get("node")
+        node = self.config.get("node") if self._pipewire_output() else None
         if not node:
             return True, ""
 
@@ -571,23 +661,28 @@ class Player:
             return True, ""
         return False, "sink %s is not present (is the device connected?)" % node
 
+    def _pipewire_output(self):
+        return self.config.get("output_mode", "pipewire") != "alsa"
+
     def _spawn(self):
         cfg = self.config
         env = _pw_env()
         # Per-child environment is what makes several players in one container
-        # work: each one points at its own sink.
-        if cfg.get("node"):
-            env["PIPEWIRE_NODE"] = cfg["node"]
-        if cfg.get("pipewire_latency"):
-            env["PIPEWIRE_LATENCY"] = cfg["pipewire_latency"]
+        # work: each one points at its own sink. Meaningless for an ALSA output,
+        # which goes straight to the device rather than through the graph.
+        if self._pipewire_output():
+            if cfg.get("node"):
+                env["PIPEWIRE_NODE"] = cfg["node"]
+            if cfg.get("pipewire_latency"):
+                env["PIPEWIRE_LATENCY"] = cfg["pipewire_latency"]
 
         args = [SNAPCLIENT, "--hostID", self.client_id]
-        if cfg.get("use_alsa"):
-            # pcm.default is mapped to PipeWire in /etc/asound.conf; this is the
-            # path that copes with a sink changing sample rate under it.
-            args += ["--player", "alsa", "-s", "default"]
-        else:
+        if self._pipewire_output():
             args += ["--player", "pipewire"]
+        else:
+            # Straight to the card. "default" still lands on PipeWire via
+            # /etc/asound.conf; a hw:... device bypasses it entirely.
+            args += ["--player", "alsa", "-s", cfg.get("alsa_device") or "default"]
         if cfg.get("latency_ms"):
             args += ["--latency", str(cfg["latency_ms"])]
         if cfg.get("extra"):

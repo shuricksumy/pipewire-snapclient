@@ -74,7 +74,7 @@ setup — e.g. LedFx or another producer also writes into the same FIFOs. Three 
 | **Stream name** | MA requires a stream named `default`. [`snapserver.conf`](snapserver.conf) here ships `Default` — rename it if you go this route. |
 
 ## Features
-- Three Roles, One Image: `snapclient`, `snapserver`, or a **web panel** that creates and supervises players for you &mdash; see [🎛️ Web panel](#-web-panel-rolepanel).
+- Web Panel by Default: run the image with no `ROLE` and you get a browser UI that creates, starts, stops and supervises players &mdash; see [🎛️ Web panel](#-web-panel-the-default-role). `ROLE=snapclient` and `ROLE=snapserver` are still there for a single-purpose container.
 
 - Native PipeWire: Built against the with-pipewire Debian package for ultra-low latency and bit-perfect sample rate switching.
 
@@ -89,6 +89,8 @@ setup — e.g. LedFx or another producer also writes into the same FIFOs. Three 
 - Always Current: Snapcast `.deb` packages are fetched from the upstream GitHub release at build time (sha256-verified against the digest GitHub publishes), so a new Snapcast release only needs a rebuild — no binaries committed to this repo.
 
 - Maintained Image: Rebuilt weekly so Debian security updates and new Snapcast releases land without a commit, and scanned with Trivy on every push.
+
+- PipeWire or ALSA: A player can bind to a PipeWire sink, or address an ALSA device directly for a host where PipeWire is broken or absent.
 
 - Healthcheck: Reports unhealthy when the snapcast process for the configured role is gone. Note this tracks the *process*, not the connection — a client retrying against an unreachable server still reports healthy, because it is alive and doing exactly what it should.
 
@@ -269,6 +271,10 @@ pw-cli ls Node | grep -E 'node.name|node.description'
 
 ##  🚀 Deployment (Docker Compose)
 
+> **Heads-up:** the image now defaults to `ROLE=panel`. A container that used to
+> run a bare snapclient with no `ROLE` set will come up as the web panel instead
+> &mdash; add `ROLE=snapclient` to keep the old behaviour.
+
 Ready-to-edit files live in the repo: [`docker-compose-example.yaml`](docker-compose-example.yaml) (client),
 [`docker-compose-server-example.yaml`](docker-compose-server-example.yaml) (server),
 [`docker-compose-panel-example.yaml`](docker-compose-panel-example.yaml) (web panel) and
@@ -327,18 +333,19 @@ services:
     restart: unless-stopped
 ```
 
-## 🎛️ Web panel (ROLE=panel)
+## 🎛️ Web panel (the default role)
 
 One container, a browser, and as many players as you have outputs &mdash; no compose
-edit and no SSH session to change a parameter. The panel lists the sinks PipeWire
-is offering, and each player you create is a supervised `snapclient` child
-process with its own `PIPEWIRE_NODE`, so several DACs run side by side out of a
-single container.
+edit and no SSH session to change a parameter. **This is what the image runs when
+no `ROLE` is set.** Each player you create is a supervised `snapclient` child
+process with its own output, so several DACs run side by side from one container.
+
+![The panel's player list](docs/panel-players.png)
 
 Every field is what the `ROLE=snapclient` role would take from the environment
-(`SERVER_IP`, `SNAP_PORT`, `CLIENT_ID`, `USE_ALSA`, `PIPEWIRE_NODE`,
-`PIPEWIRE_LATENCY`, `SNAP_EXTRA`), editable per player at runtime. Players are
-stored in `/config/players.json` and restored on restart.
+(`SERVER_IP`, `SNAP_PORT`, `CLIENT_ID`, `PIPEWIRE_NODE`, `PIPEWIRE_LATENCY`,
+`SNAP_EXTRA`), editable per player at runtime. Players live in
+`/config/players.json` and come back on restart.
 
 ```bash
 mkdir -p panel_config && sudo chown -R 1000:1000 panel_config
@@ -347,8 +354,37 @@ docker compose -f docker-compose-panel-example.yaml up -d
 ```
 
 It also reads the snapserver's control port, so each row shows what is playing
-and offers transport and volume controls &mdash; the same ones Snapweb and Music
-Assistant drive, acting on the stream the player's group is attached to.
+and offers transport and volume &mdash; the same controls Snapweb and Music Assistant
+drive, acting on the stream the player's group is attached to. A **paused** player
+keeps its controls (Music Assistant parks a paused group on a stream that reports
+`canControl=false`, so the panel drives the last controllable one instead); a
+**stopped** player resets its row entirely.
+
+### Two ways to reach a DAC
+
+Every player picks one output, and the dialog lists both kinds together:
+
+![The edit dialog](docs/panel-edit.png)
+
+| Output | What it does | When you want it |
+| :-- | :-- | :-- |
+| **PipeWire** | Binds the player to one sink via `PIPEWIRE_NODE`. Sample rate follows the source, volume lands on the hardware sink, and the panel watches the sink so an unplugged DAC is noticed. | The normal case on a host with a working PipeWire session. |
+| **ALSA** | Hands the device straight to `snapclient -s`, e.g. `hw:CARD=DX5,DEV=0`. Skips `PIPEWIRE_NODE` and the sink watchdog, which have no meaning off the graph. | PipeWire is broken, absent, or you want the card to yourself. |
+
+ALSA devices are enumerated with `snapclient -l`. That needs the sound hardware
+passed through **as devices, not as a volume**:
+
+```yaml
+devices:
+  - /dev/snd:/dev/snd     # NOT "-v /dev/snd:/dev/snd"
+```
+
+`-v` maps the device nodes but the container's device cgroup still refuses to
+open them, so `snapclient` reports "No such device" and enumeration comes back
+with conversion plugins only. The panel detects exactly that and says so in a
+banner. If your device is not listed, **Custom ALSA device…** lets you type it.
+
+### Notes
 
 **Real-time scheduling is container-level.** Players are children of the panel
 process, so they inherit *its* limits: the panel needs the same
@@ -359,7 +395,9 @@ every player runs at normal priority and audio glitches under load. The
 **Two things it does not do.** Restarting the container stops every player &mdash;
 one container per player survives a panel restart, this does not. And it manages
 *clients*, not the server: groups, streams and server-wide settings still belong
-to Snapweb or Music Assistant, which each row links to.
+to Snapweb or Music Assistant, which the header links to.
+
+The 🌗 button cycles system / light / dark and remembers the choice.
 
 > **Security:** with `ADMIN_PASSWORD` unset there is no authentication at all &mdash;
 > intended for a trusted LAN. Set `ADMIN_PASSWORD` (and optionally `ADMIN_USER`)
@@ -382,7 +420,7 @@ The image runs as **uid/gid 1000** (group `audio`), not root. 1000 is the uid th
 
 | Variable | Default | Description |
 | :-- | :-- | :-- |
-|ROLE|snapclient|```snapclient```, ```snapserver``` or ```panel``` (the web UI).|
+|ROLE|**panel**|```panel``` (the web UI, the default), ```snapclient``` or ```snapserver```.|
 |SNAP_PORT|1704|The TCP streaming port. Ignored if `SERVER_IP` already carries a port.|
 |SERVER_IP|127.0.0.1|(Client only) Snapserver address. Accepts `host`, `host:port` or `tcp://host:port`.|
 |CLIENT_ID|Snap-Node|(Client only) Name appearing in the Web UI (`--hostID`).|

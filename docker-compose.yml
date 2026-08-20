@@ -17,7 +17,7 @@ services:
       - /dev/shm:/dev/shm
 
     environment:
-      - ROLE=snapclient
+      - ROLE=snapclient   # required: the image defaults to the web panel
       - SERVER_IP=192.168.111.111   # Snapserver host (bare IP, host:port, or tcp://host:port)
       - SNAP_PORT=1704              # Snapserver stream port
       - CLIENT_ID=DX5-Snapclient    # Name shown in the Snapcast web UI
