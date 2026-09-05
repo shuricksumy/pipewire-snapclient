@@ -3,12 +3,14 @@
 # under a lingering user session, bit-perfect clock config, and the socket the
 # container bind-mounts at /run/user/<uid>/pipewire-0.
 #
-# Usage:  ./ubuntu-pipewire-install-on-host.sh [username]      (default: dietpi)
+# Usage:  ./ubuntu-pipewire-install-on-host.sh [username]
+#
+# With no argument it sets up whoever owns uid 1000, which is what the container
+# runs as and what the compose files bind-mount (/run/user/1000/pipewire-0). Pass
+# a username to use a different account -- if it does not exist yet it is created,
+# taking uid 1000 when that is still free.
 
 set -euo pipefail
-
-# --- CONFIGURATION ---
-TARGET_USER="${1:-${TARGET_USER:-dietpi}}"
 
 trap 'echo ">>> FAILED at line $LINENO. Nothing below this point ran." >&2' ERR
 
@@ -17,7 +19,12 @@ if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
     exit 1
 fi
 
-echo ">>> Starting Audiophile Environment Setup for user: $TARGET_USER"
+TARGET_USER="${1:-${TARGET_USER:-}}"
+if [ -n "$TARGET_USER" ]; then
+    echo ">>> Starting Audiophile Environment Setup for user: $TARGET_USER"
+else
+    echo ">>> Starting Audiophile Environment Setup for the uid-1000 user"
+fi
 
 # --- 0. INSTALLATION ---
 # Package names matter: apt aborts the WHOLE command on one unknown name, so a
@@ -29,14 +36,115 @@ echo ">>> Installing PipeWire and audiophile tools..."
 sudo apt-get update
 sudo apt-get install -y \
     pipewire pipewire-audio pipewire-pulse pipewire-alsa \
-    wireplumber alsa-utils pulseaudio-utils rtkit
+    wireplumber alsa-utils pulseaudio-utils rtkit \
+    ca-certificates curl
+
+# --- 0b. DOCKER ---
+# The container has to run somewhere. Distro packages lag badly and often ship
+# without the compose plugin, so this uses Docker's own repository -- the same
+# steps as https://lindevs.com/install-docker-ce-on-ubuntu/, with the repo URI
+# chosen for Debian or Ubuntu rather than assuming one.
+# Set SKIP_DOCKER=1 to leave the host's Docker setup alone.
+if [ -n "${SKIP_DOCKER:-}" ]; then
+    echo ">>> SKIP_DOCKER set -- not touching Docker."
+elif command -v docker >/dev/null 2>&1; then
+    echo ">>> Docker already installed: $(docker --version)"
+    if ! docker compose version >/dev/null 2>&1; then
+        echo ">>> WARN: the 'docker compose' plugin is missing. The compose files in"
+        echo ">>> this repo need it:  sudo apt-get install -y docker-compose-plugin"
+    fi
+else
+    # Which flavour of Docker's repo to use. ID_LIKE covers the derivatives --
+    # Armbian, Raspberry Pi OS, Mint -- which is most of the boxes this runs on.
+    # Read rather than sourced: /etc/os-release is shell syntax, and sourcing it
+    # would drop a dozen names (NAME, VERSION, ID...) into this script's scope.
+    # '|| true' matters: plain Debian has no ID_LIKE line, so grep exits 1, and
+    # under 'set -e' that would abort the script inside the assignment below.
+    os_field() { grep -E "^$1=" /etc/os-release 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true; }
+    OS_ID="$(os_field ID)"
+    OS_LIKE="$(os_field ID_LIKE)"
+    DOCKER_CODENAME="$(os_field VERSION_CODENAME)"
+    [ -n "$DOCKER_CODENAME" ] || DOCKER_CODENAME="$(os_field UBUNTU_CODENAME)"
+
+    DOCKER_DISTRO=""
+    case " $OS_ID $OS_LIKE " in
+        *" ubuntu "*) DOCKER_DISTRO=ubuntu ;;
+        *" debian "*) DOCKER_DISTRO=debian ;;
+    esac
+
+    if [ -z "$DOCKER_DISTRO" ] || [ -z "$DOCKER_CODENAME" ]; then
+        echo ">>> Cannot tell which Docker repository fits this system." >&2
+        echo ">>> Install Docker yourself, then re-run:" >&2
+        echo ">>>     https://docs.docker.com/engine/install/" >&2
+        exit 1
+    fi
+
+    echo ">>> Installing Docker CE for $DOCKER_DISTRO/$DOCKER_CODENAME..."
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL "https://download.docker.com/linux/$DOCKER_DISTRO/gpg" \
+        -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Skip if some other tool already configured the repo (newer installs use the
+    # DEB822 docker.sources); adding both would give apt a duplicate entry.
+    if [ -f /etc/apt/sources.list.d/docker.sources ]; then
+        echo ">>> docker.sources already present; leaving the repo config alone."
+    else
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DOCKER_DISTRO $DOCKER_CODENAME stable" \
+            | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+    fi
+
+    sudo apt-get update
+    sudo apt-get install -y \
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    # Not fatal: PipeWire is what this script is really for, and Docker failing
+    # to start is usually a host condition that has nothing to do with audio.
+    if sudo systemctl enable --now docker; then
+        echo ">>> $(docker --version)"
+    else
+        echo ">>> WARN: Docker is installed but the daemon did not start." >&2
+        if [ ! -d "/lib/modules/$(uname -r)" ]; then
+            # The usual cause on SBCs. A kernel upgrade removed the running
+            # kernel's modules, so nothing can be modprobed -- including
+            # nf_tables, without which dockerd cannot create its NAT chain and
+            # exits with "iptables: Could not fetch rule set generation id".
+            echo ">>> The running kernel $(uname -r) has no /lib/modules directory:" >&2
+            echo ">>> a kernel upgrade is waiting for a reboot. Reboot, then re-run this." >&2
+        else
+            echo ">>> Check:  systemctl status docker.service" >&2
+            echo ">>>         journalctl -u docker.service -n 50 --no-pager" >&2
+        fi
+        echo ">>> Continuing with the PipeWire setup, which does not need Docker."
+    fi
+fi
 
 # --- 1. USER SETUP ---
-if id "$TARGET_USER" &>/dev/null; then
-    echo ">>> User '$TARGET_USER' already exists. Updating groups..."
+if [ -n "$TARGET_USER" ]; then
+    if id "$TARGET_USER" &>/dev/null; then
+        echo ">>> User '$TARGET_USER' already exists. Updating groups..."
+    else
+        # Pin uid 1000 when it is free: the image runs as 1000, so matching it
+        # means no 'user:' line is needed in compose.
+        if getent passwd 1000 >/dev/null; then
+            echo ">>> Creating audio user '$TARGET_USER' (uid 1000 is taken by $(getent passwd 1000 | cut -d: -f1))..."
+            sudo useradd -m -s /bin/bash "$TARGET_USER"
+        else
+            echo ">>> Creating audio user '$TARGET_USER' with uid 1000..."
+            sudo useradd -m -u 1000 -s /bin/bash "$TARGET_USER"
+        fi
+    fi
 else
-    echo ">>> Creating dedicated audio user '$TARGET_USER'..."
-    sudo useradd -m -s /bin/bash "$TARGET_USER"
+    # No argument: the uid-1000 account, whatever it is called on this box --
+    # dietpi, ubuntu, pi, or your own login.
+    # '|| true': getent exits non-zero when there is no uid 1000, and under
+    # 'set -e' that would kill the script before the friendly message below.
+    TARGET_USER="$(getent passwd 1000 | cut -d: -f1 || true)"
+    if [ -z "$TARGET_USER" ]; then
+        echo ">>> No user with uid 1000 on this host, and no username given." >&2
+        echo ">>> Pass one to create it:  $0 <username>" >&2
+        exit 1
+    fi
+    echo ">>> No username given; using uid 1000 -> '$TARGET_USER'"
 fi
 
 USER_UID="$(id -u "$TARGET_USER")"
@@ -144,13 +252,34 @@ cat <<EOF
 
 --- COMPOSE SETTINGS FOR THIS HOST ---
 
-  user: "$USER_UID:$USER_GID"
   volumes:
     - $SOCKET:/tmp/pipewire-0
     - /dev/shm:/dev/shm
+EOF
+
+if [ "$USER_UID" != "1000" ] || [ "$USER_GID" != "1000" ]; then
+cat <<EOF
+
+  # The image runs as 1000:1000 by default, but '$TARGET_USER' is $USER_UID:$USER_GID,
+  # so this line is REQUIRED or the container cannot open the socket above:
+  user: "$USER_UID:$USER_GID"
+EOF
+else
+cat <<EOF
+
+  # '$TARGET_USER' is 1000:1000, which is what the image already runs as,
+  # so no 'user:' line is needed.
+EOF
+fi
+
+cat <<EOF
 
 Pick PLAYER_NAME from the sink names in 'wpctl status' above, and PIPEWIRE_NODE from:
   sudo -u $TARGET_USER XDG_RUNTIME_DIR=/run/user/$USER_UID pw-cli ls Node | grep -E 'node.name|node.description'
+
+SERVER_IP is your Snapserver as <ip> (audio on SNAP_PORT 1704, control on 1705).
+Music Assistant ships one built in -- point this at the MA host and add the
+Snapcast provider there. CLIENT_ID is the name you will see in the client list.
 
 If you added groups to your own login user, log out and back in for them to apply.
 

@@ -154,17 +154,30 @@ The container does **not** run its own PipeWire daemon — it connects to the ho
 a bind-mounted socket. So the host has to be a working PipeWire machine first.
 
 > **Shortcut:** [`ubuntu-pipewire-install-on-host.sh`](ubuntu-pipewire-install-on-host.sh)
-> does all of it for a dedicated user, verifies the socket, and prints the compose settings
-> for your host: `./ubuntu-pipewire-install-on-host.sh <username>` (default: `dietpi`).
+> does all of it, verifies the socket, and prints the compose settings for your host:
+>
+> ```bash
+> ./ubuntu-pipewire-install-on-host.sh              # the uid-1000 user, whatever it is called
+> ./ubuntu-pipewire-install-on-host.sh <username>   # or a specific account
+> ```
+>
+> With no argument it targets **uid 1000** — the uid the container runs as, and the one in the
+> `/run/user/1000/pipewire-0` path the compose files mount, so no `user:` line is needed. A
+> username that does not exist yet is created, taking uid 1000 if that is still free. It also
+> installs Docker CE when `docker` is missing (`SKIP_DOCKER=1` to skip that).
 
 <details>
 <summary><b>Step by step</b></summary>
 
 ### 0. Prerequisites
 
-Docker Engine plus the Compose plugin ([install guide](https://docs.docker.com/engine/install/)),
-and the uid of the user whose PipeWire session the container will attach to. Note it now — the
-same number appears in the socket path *and* in `user:` in your compose file:
+Docker Engine plus the Compose plugin. The script above installs both from Docker's own
+repository when `docker` is not already on the host (distro packages lag and often omit the
+compose plugin); set `SKIP_DOCKER=1` to leave an existing setup alone, or install it yourself
+from the [official guide](https://docs.docker.com/engine/install/).
+
+You also want the uid of the user whose PipeWire session the container will attach to. Note it
+now — the same number appears in the socket path *and* in `user:` in your compose file:
 
 ```bash
 id -u    # usually 1000
