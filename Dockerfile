@@ -6,7 +6,7 @@
 # used to be committed under pkg/; they were byte-identical to these release
 # assets, so they were 10 MB of binaries in git that had to be refreshed by hand
 # on every Snapcast release.
-FROM --platform=$BUILDPLATFORM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS snapcast
+FROM --platform=$BUILDPLATFORM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad AS snapcast
 
 ARG TARGETARCH
 # Release to install. "latest" resolves the newest published release at build
@@ -47,7 +47,7 @@ RUN set -eu; \
 
 
 # --- Stage 1: Runtime ---
-FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
+FROM debian:trixie-slim@sha256:62bd423aeee912639ca8ee681c2b762cb3e25137e0a92b20be455898a9f034ad
 
 # Changing this busts the apt cache so a scheduled rebuild actually picks up new
 # Debian security updates instead of restoring the whole layer from the GHA
